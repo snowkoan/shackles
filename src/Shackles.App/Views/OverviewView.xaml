@@ -1,0 +1,86 @@
+<UserControl x:Class="Shackles.App.Views.OverviewView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <UniformGrid Columns="3" Margin="0,0,0,14">
+                <Border Margin="0,0,8,0" Style="{StaticResource CardBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptionStyle}" Text="ACTIVE PROCESSES" />
+                        <TextBlock Margin="0,4,0,0" FontSize="22" FontWeight="SemiBold" Text="{Binding Accounting.ActiveProcessCount}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="4,0" Style="{StaticResource CardBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptionStyle}" Text="TOTAL CPU TIME" />
+                        <TextBlock Margin="0,4,0,0" FontSize="22" FontWeight="SemiBold" Text="{Binding Accounting.CpuTimeDisplay}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="8,0,0,0" Style="{StaticResource CardBorderStyle}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CaptionStyle}" Text="I/O" />
+                        <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding Accounting.IoDisplay}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <GroupBox Header="Current membership" Style="{StaticResource EditorGroupStyle}">
+                <ListView ItemsSource="{Binding Members}"
+                          MinHeight="110"
+                          MaxHeight="230"
+                          AutomationProperties.Name="Processes in selected job">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Width="220" Header="Process" DisplayMemberBinding="{Binding Name}" />
+                            <GridViewColumn Width="90" Header="PID" DisplayMemberBinding="{Binding ProcessId}" />
+                            <GridViewColumn Width="130" Header="State" DisplayMemberBinding="{Binding State}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </GroupBox>
+
+            <GroupBox Header="Live completion-port events (most recent 200)" Style="{StaticResource EditorGroupStyle}">
+                <StackPanel>
+                    <TextBlock Margin="0,0,0,8"
+                               Style="{StaticResource CaptionStyle}"
+                               Text="{Binding LiveNotificationDescription}"
+                               TextWrapping="Wrap" />
+                    <ListView ItemsSource="{Binding LiveNotifications}"
+                              MinHeight="90"
+                              MaxHeight="220"
+                              AutomationProperties.LiveSetting="Polite"
+                              AutomationProperties.Name="Recent live job notifications">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Width="155" Header="Received" DisplayMemberBinding="{Binding ReceivedAtDisplay}" />
+                                <GridViewColumn Width="170" Header="Event" DisplayMemberBinding="{Binding Kind}" />
+                                <GridViewColumn Width="80" Header="PID" DisplayMemberBinding="{Binding ProcessIdDisplay}" />
+                                <GridViewColumn Width="360" Header="Details" DisplayMemberBinding="{Binding Detail}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </StackPanel>
+            </GroupBox>
+
+            <GroupBox Header="Current violation telemetry (sampled on refresh)" Style="{StaticResource EditorGroupStyle}">
+                <StackPanel>
+                    <TextBlock Margin="0,0,0,8"
+                               Style="{StaticResource CaptionStyle}"
+                               Text="This is the current violation state queried when the job is refreshed. It is separate from the live event history above." />
+                    <ListView ItemsSource="{Binding LimitViolations}"
+                              MinHeight="80"
+                              MaxHeight="180"
+                              AutomationProperties.Name="Current sampled limit violation telemetry">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Width="170" Header="Kind" DisplayMemberBinding="{Binding Kind}" />
+                                <GridViewColumn Width="360" Header="Details" DisplayMemberBinding="{Binding Detail}" />
+                                <GridViewColumn Width="160" Header="Observed" DisplayMemberBinding="{Binding ObservedAt}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </StackPanel>
+            </GroupBox>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

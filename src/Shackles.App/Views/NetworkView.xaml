@@ -1,0 +1,67 @@
+<UserControl x:Class="Shackles.App.Views.NetworkView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <Border Margin="0,0,0,14"
+                    Padding="11"
+                    CornerRadius="6"
+                    Background="{DynamicResource MutedPanelBrush}">
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Style="{StaticResource BadgeStyle}">
+                        <TextBlock FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding Capabilities.NetworkRateControl.BadgeText}" />
+                    </Border>
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Outbound network control and DSCP marking" />
+                        <TextBlock Style="{StaticResource CaptionStyle}"
+                                   Text="{Binding Capabilities.NetworkRateControl.Reason}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <GroupBox Header="Network policy"
+                      Style="{StaticResource EditorGroupStyle}"
+                      IsEnabled="{Binding Capabilities.NetworkRateControl.CanSet}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250" />
+                        <ColumnDefinition Width="170" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <CheckBox IsChecked="{Binding Editor.NetworkBandwidthEnabled}"
+                              Content="Maximum outbound bandwidth" />
+                    <TextBox Grid.Column="1"
+                             Margin="8,3"
+                             IsEnabled="{Binding Editor.NetworkBandwidthEnabled}"
+                             Text="{Binding Editor.NetworkBandwidthMbps, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Column="2"
+                               Margin="7,0"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource CaptionStyle}"
+                               Text="Mbit/s hard control" />
+
+                    <CheckBox Grid.Row="1"
+                              IsChecked="{Binding Editor.DscpEnabled}"
+                              Content="DSCP tag" />
+                    <TextBox Grid.Row="1"
+                             Grid.Column="1"
+                             Margin="8,3"
+                             IsEnabled="{Binding Editor.DscpEnabled}"
+                             Text="{Binding Editor.DscpTag, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Grid.Row="1"
+                               Grid.Column="2"
+                               Margin="7,0"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource CaptionStyle}"
+                               Text="0–63; actual packet marking can be affected by network policy" />
+                </Grid>
+            </GroupBox>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

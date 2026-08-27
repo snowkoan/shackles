@@ -1,0 +1,102 @@
+<Window x:Class="Shackles.App.Dialogs.LaunchProcessDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Launch executable in job"
+        Width="650"
+        SizeToContent="Height"
+        MaxHeight="760"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="22">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Style="{StaticResource SectionTitleStyle}"
+                       Text="Launch directly inside the selected job" />
+
+            <StackPanel Grid.Row="1" Margin="0,16,0,0">
+                <Label Target="{Binding ElementName=ExecutableBox}"
+                       Padding="0,0,0,5"
+                       FontWeight="SemiBold"
+                       Content="_Executable" />
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Margin="8,0,0,0"
+                            Click="BrowseExecutable_Click"
+                            Content="_Browse…" />
+                    <TextBox x:Name="ExecutableBox"
+                             AutomationProperties.HelpText="Absolute path to the executable to launch." />
+                </DockPanel>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Margin="0,13,0,0">
+                <Label Target="{Binding ElementName=ArgumentsBox}"
+                       Padding="0,0,0,5"
+                       FontWeight="SemiBold"
+                       Content="_Arguments" />
+                <TextBox x:Name="ArgumentsBox"
+                         AutomationProperties.HelpText="Arguments are passed to the executable without invoking a command shell." />
+                <TextBlock Margin="0,5,0,0"
+                           Style="{StaticResource CaptionStyle}"
+                           Text="Arguments are passed directly to CreateProcess; Shackles never invokes cmd.exe or PowerShell." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="3" Margin="0,13,0,0">
+                <Label Target="{Binding ElementName=WorkingDirectoryBox}"
+                       Padding="0,0,0,5"
+                       FontWeight="SemiBold"
+                       Content="_Working directory" />
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Margin="8,0,0,0"
+                            Click="BrowseWorkingDirectory_Click"
+                            Content="B_rowse…" />
+                    <TextBox x:Name="WorkingDirectoryBox"
+                             AutomationProperties.HelpText="Optional absolute working directory." />
+                </DockPanel>
+            </StackPanel>
+
+            <Border Grid.Row="4"
+                    Margin="0,15,0,0"
+                    Padding="11"
+                    CornerRadius="6"
+                    Background="{DynamicResource MutedPanelBrush}">
+                <StackPanel>
+                    <TextBlock FontWeight="SemiBold"
+                               Text="Atomic job assignment" />
+                    <TextBlock Margin="0,4,0,0"
+                               Style="{StaticResource CaptionStyle}"
+                               Text="The process is created suspended, assigned to the job, and only then resumed. If assignment fails, it is terminated before it can run." />
+                    <TextBlock x:Name="ErrorText"
+                               Margin="0,8,0,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.HotTrackBrushKey}}"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed"
+                               AutomationProperties.LiveSetting="Assertive" />
+                </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Row="5"
+                        Margin="0,18,0,0"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button MinWidth="88"
+                        Margin="0,0,8,0"
+                        IsCancel="True"
+                        Content="_Cancel" />
+                <Button MinWidth="100"
+                        IsDefault="True"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="LaunchButton_Click"
+                        Content="_Launch" />
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Window>

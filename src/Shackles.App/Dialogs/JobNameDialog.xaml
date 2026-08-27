@@ -1,0 +1,74 @@
+<Window x:Class="Shackles.App.Dialogs.JobNameDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Named job"
+        Width="500"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeadingText"
+                   Style="{StaticResource SectionTitleStyle}"
+                   Text="Create a job" />
+
+        <StackPanel Grid.Row="1" Margin="0,16,0,0">
+            <Label Target="{Binding ElementName=NameBox}"
+                   Padding="0,0,0,5"
+                   FontWeight="SemiBold"
+                   Content="_Job object name" />
+            <TextBox x:Name="NameBox"
+                     MinWidth="440"
+                     MaxLength="260"
+                     AutomationProperties.HelpText="Windows kernel object name. New private jobs may be left blank." />
+            <TextBlock x:Name="NameHelpText"
+                       Margin="0,6,0,0"
+                       Style="{StaticResource CaptionStyle}"
+                       Text="Optional. Leave blank for a private unnamed job held only by this app." />
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Margin="0,14,0,0"
+                Padding="10"
+                CornerRadius="6"
+                Background="{DynamicResource MutedPanelBrush}">
+            <StackPanel>
+                <TextBlock Text="Named jobs are opened by exact name."
+                           FontWeight="SemiBold" />
+                <TextBlock x:Name="EnumerationNote"
+                           Margin="0,3,0,0"
+                           Style="{StaticResource CaptionStyle}"
+                           Text="Windows does not expose a supported API for enumerating every job object on the system." />
+                <TextBlock x:Name="ErrorText"
+                           Margin="0,7,0,0"
+                           Foreground="{DynamicResource {x:Static SystemColors.HotTrackBrushKey}}"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed"
+                           AutomationProperties.LiveSetting="Assertive" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,18,0,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+            <Button MinWidth="88"
+                    Margin="0,0,8,0"
+                    IsCancel="True"
+                    Content="_Cancel" />
+            <Button x:Name="AcceptButton"
+                    MinWidth="100"
+                    IsDefault="True"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Click="AcceptButton_Click"
+                    Content="_Create" />
+        </StackPanel>
+    </Grid>
+</Window>

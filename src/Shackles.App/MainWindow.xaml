@@ -1,0 +1,293 @@
+<Window x:Class="Shackles.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:Shackles.App.Views"
+        Title="Shackles"
+        Width="1420"
+        Height="900"
+        MinWidth="1040"
+        MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing"
+        PreviewKeyDown="Window_PreviewKeyDown">
+    <DockPanel>
+        <Border DockPanel.Dock="Top"
+                Padding="18,12"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock FontSize="21" FontWeight="SemiBold" Text="Shackles" />
+                <TextBlock Style="{StaticResource CaptionStyle}" Text="Windows process restriction control center" />
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                MinHeight="34"
+                Padding="14,7"
+                Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0">
+            <TextBlock Text="{Binding StatusMessage}"
+                       TextTrimming="CharacterEllipsis"
+                       AutomationProperties.LiveSetting="Polite">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding StatusIsError}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HotTrackBrushKey}}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Border>
+
+        <Grid Margin="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" MinWidth="300" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" MinWidth="620" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Margin="16,15,16,10">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right"
+                                    Margin="8,0,0,0"
+                                    Padding="9,5"
+                                    Command="{Binding RefreshProcessesCommand}"
+                                    ToolTip="Refresh running processes"
+                                    AutomationProperties.Name="Refresh running processes"
+                                    Content="Refresh" />
+                            <TextBlock Style="{StaticResource SectionTitleStyle}"
+                                       VerticalAlignment="Center"
+                                       Text="Running processes" />
+                        </DockPanel>
+                        <TextBlock Margin="0,5,0,0"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="Select one or more rows, then drag them onto a Job Object card." />
+                    </StackPanel>
+
+                    <TextBox x:Name="ProcessSearchBox"
+                             Grid.Row="1"
+                             Margin="16,0,16,10"
+                             Text="{Binding ProcessSearch, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Search by name, PID, or path"
+                             AutomationProperties.Name="Search running processes"
+                             AutomationProperties.HelpText="Filter by process name, PID, or executable path" />
+
+                    <ListView x:Name="ProcessList"
+                              Grid.Row="2"
+                              Margin="0,0,0,8"
+                              ItemsSource="{Binding ProcessView}"
+                              SelectionMode="Extended"
+                              BorderThickness="0,1,0,1"
+                              PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
+                              PreviewMouseMove="ProcessList_PreviewMouseMove"
+                              AutomationProperties.Name="Running processes">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="ToolTip" Value="{Binding AssignmentHint}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsAssignable}" Value="False">
+                                        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.View>
+                            <GridView AllowsColumnReorder="True">
+                                <GridViewColumn Width="135" Header="Name" DisplayMemberBinding="{Binding Name}" />
+                                <GridViewColumn Width="62" Header="PID" DisplayMemberBinding="{Binding ProcessId}" />
+                                <GridViewColumn Width="76" Header="Memory" DisplayMemberBinding="{Binding WorkingSetDisplay}" />
+                                <GridViewColumn Width="58" Header="Session" DisplayMemberBinding="{Binding SessionId}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <StackPanel Grid.Row="3" Margin="16,4,16,15">
+                        <Button Style="{StaticResource PrimaryButtonStyle}"
+                                Click="AssignSelected_Click"
+                                Content="_Assign selected to chosen Job Object" />
+                        <TextBlock Margin="0,6,0,0"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="Keyboard: select rows, choose a Job Object card, then press Alt+A or Ctrl+Enter." />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          Background="Transparent"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="True" />
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" MaxHeight="190" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Padding="14,12"
+                        Background="{DynamicResource PanelBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        AutomationProperties.Name="Job Objects workspace">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel>
+                            <DockPanel LastChildFill="True">
+                                <Border DockPanel.Dock="Left" Style="{StaticResource BadgeStyle}">
+                                    <TextBlock FontSize="10" FontWeight="SemiBold" Text="WORKSPACE" />
+                                </Border>
+                                <TextBlock Style="{StaticResource SectionTitleStyle}"
+                                           VerticalAlignment="Center"
+                                           Text="Job Objects" />
+                            </DockPanel>
+                            <TextBlock Margin="0,5,0,0"
+                                       Style="{StaticResource CaptionStyle}"
+                                       Text="Only Job Objects created or explicitly opened here are shown; Windows does not support arbitrary system Job Object enumeration." />
+                        </StackPanel>
+                        <WrapPanel Grid.Row="1" Margin="0,10,0,0">
+                            <Button Margin="0,0,8,0" Click="NewJob_Click" Content="_New Job Object" />
+                            <Button Margin="0,0,8,0" Click="OpenJob_Click" Content="_Open named Job Object" />
+                            <Button Click="LaunchProcess_Click" Content="_Launch in Job Object…" />
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+
+                <ListBox x:Name="JobList"
+                         Grid.Row="1"
+                         Margin="0,10,0,0"
+                         ItemsSource="{Binding Jobs}"
+                         SelectedItem="{Binding SelectedJob}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         AutomationProperties.Name="Job Objects opened in this session">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,10,8" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Border Width="250"
+                                    MinHeight="112"
+                                    Style="{StaticResource CardBorderStyle}"
+                                    AllowDrop="True"
+                                    DragEnter="JobCard_DragEnter"
+                                    DragLeave="JobCard_DragLeave"
+                                    Drop="JobCard_Drop"
+                                    AutomationProperties.Name="{Binding DisplayName}"
+                                    AutomationProperties.HelpText="Drop selected process rows here to assign them to this Job Object.">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource BadgeStyle}">
+                                            <TextBlock FontSize="10" FontWeight="SemiBold" Text="{Binding OriginBadge}" />
+                                        </Border>
+                                        <TextBlock FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   Text="{Binding DisplayName}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding DisplayName}" />
+                                    </DockPanel>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" Text="{Binding MemberCountDisplay}" />
+                                    <TextBlock Grid.Row="2"
+                                               Margin="0,4,0,0"
+                                               Style="{StaticResource CaptionStyle}"
+                                               Text="{Binding RestrictionSummary}" />
+                                    <TextBlock Grid.Row="3"
+                                               Margin="0,8,0,0"
+                                               Foreground="{DynamicResource AccentBrush}"
+                                               FontWeight="SemiBold"
+                                               Text="Drop processes here" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <Border Grid.Row="3" Style="{StaticResource CardBorderStyle}" Padding="0">
+                    <Grid>
+                        <Grid>
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasSelectedJob}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <StackPanel MaxWidth="470"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        TextBlock.TextAlignment="Center">
+                                <TextBlock FontSize="22" FontWeight="SemiBold" Text="Create or open a Job Object" />
+                                <TextBlock Margin="0,8,0,16"
+                                           Style="{StaticResource CaptionStyle}"
+                                           Text="Configure restrictions first, or create a Job Object and drag running processes onto its card." />
+                                <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                                    <Button Margin="0,0,8,0" Click="NewJob_Click" Content="_New Job Object" />
+                                    <Button Click="OpenJob_Click" Content="_Open named Job Object" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
+
+                        <views:JobDetailsView DataContext="{Binding SelectedJob}"
+                                              LaunchRequested="JobDetails_LaunchRequested"
+                                              CloseRequested="JobDetails_CloseRequested">
+                            <views:JobDetailsView.Style>
+                                <Style TargetType="{x:Type views:JobDetailsView}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding DataContext.HasSelectedJob, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </views:JobDetailsView.Style>
+                        </views:JobDetailsView>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </DockPanel>
+</Window>

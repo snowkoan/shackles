@@ -1,0 +1,185 @@
+<UserControl x:Class="Shackles.App.Views.NotificationsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+            <Border Margin="0,0,0,14"
+                    Padding="11"
+                    CornerRadius="6"
+                    Background="{DynamicResource MutedPanelBrush}">
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Style="{StaticResource BadgeStyle}">
+                        <TextBlock FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding Capabilities.NotificationLimits.BadgeText}" />
+                    </Border>
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Notification-only thresholds" />
+                        <TextBlock Style="{StaticResource CaptionStyle}"
+                                   Text="These values configure Windows notification-only thresholds. They do not throttle or terminate processes; Shackles queries current violation state on refresh." />
+                        <TextBlock Style="{StaticResource CaptionStyle}"
+                                   Text="{Binding Capabilities.NotificationLimits.Reason}" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <StackPanel IsEnabled="{Binding Capabilities.NotificationLimits.CanSet}">
+                <Border Margin="0,0,0,14"
+                        Padding="11"
+                        CornerRadius="6"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        Background="{DynamicResource MutedPanelBrush}">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="Relative time threshold behavior" />
+                        <TextBlock Margin="0,3,0,0"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="The per-job soft user-time threshold is relative. Applying any change in this notification class—including a memory, I/O, or rate sibling—rebases and restarts that time threshold." />
+                    </StackPanel>
+                </Border>
+
+                <GroupBox Header="Resource thresholds" Style="{StaticResource EditorGroupStyle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="260" />
+                            <ColumnDefinition Width="170" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <CheckBox IsChecked="{Binding Editor.NotifyJobTimeEnabled}"
+                                  Content="Per-job user time threshold" />
+                        <TextBox Grid.Column="1"
+                                 Margin="8,3"
+                                 IsEnabled="{Binding Editor.NotifyJobTimeEnabled}"
+                                 Text="{Binding Editor.NotifyJobTimeSeconds, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Column="2"
+                                   Margin="7,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="seconds" />
+
+                        <CheckBox Grid.Row="1"
+                                  IsChecked="{Binding Editor.NotifyJobMemoryEnabled}"
+                                  Content="Job high-memory threshold" />
+                        <TextBox Grid.Row="1"
+                                 Grid.Column="1"
+                                 Margin="8,3"
+                                 IsEnabled="{Binding Editor.NotifyJobMemoryEnabled}"
+                                 Text="{Binding Editor.NotifyJobMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="1"
+                                   Grid.Column="2"
+                                   Margin="7,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="MiB" />
+
+                        <CheckBox Grid.Row="2"
+                                  IsChecked="{Binding Editor.NotifyLowMemoryEnabled}"
+                                  Content="Job low-memory threshold" />
+                        <TextBox Grid.Row="2"
+                                 Grid.Column="1"
+                                 Margin="8,3"
+                                 IsEnabled="{Binding Editor.NotifyLowMemoryEnabled}"
+                                 Text="{Binding Editor.NotifyLowMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="2"
+                                   Grid.Column="2"
+                                   Margin="7,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="MiB" />
+
+                        <CheckBox Grid.Row="3"
+                                  IsChecked="{Binding Editor.NotifyIoReadEnabled}"
+                                  Content="I/O read threshold" />
+                        <TextBox Grid.Row="3"
+                                 Grid.Column="1"
+                                 Margin="8,3"
+                                 IsEnabled="{Binding Editor.NotifyIoReadEnabled}"
+                                 Text="{Binding Editor.NotifyIoReadMb, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="3"
+                                   Grid.Column="2"
+                                   Margin="7,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="MiB" />
+
+                        <CheckBox Grid.Row="4"
+                                  IsChecked="{Binding Editor.NotifyIoWriteEnabled}"
+                                  Content="I/O write threshold" />
+                        <TextBox Grid.Row="4"
+                                 Grid.Column="1"
+                                 Margin="8,3"
+                                 IsEnabled="{Binding Editor.NotifyIoWriteEnabled}"
+                                 Text="{Binding Editor.NotifyIoWriteMb, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="4"
+                                   Grid.Column="2"
+                                   Margin="7,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionStyle}"
+                                   Text="MiB" />
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="Rate-control tolerance notifications" Style="{StaticResource EditorGroupStyle}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="180" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Column="1" Style="{StaticResource FieldLabelStyle}" Text="Tolerance" />
+                        <TextBlock Grid.Column="2" Style="{StaticResource FieldLabelStyle}" Text="Interval" />
+
+                        <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="CPU" />
+                        <ComboBox Grid.Row="1"
+                                  Grid.Column="1"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceChoices}"
+                                  SelectedItem="{Binding Editor.CpuTolerance}" />
+                        <ComboBox Grid.Row="1"
+                                  Grid.Column="2"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceIntervalChoices}"
+                                  SelectedItem="{Binding Editor.CpuToleranceInterval}" />
+
+                        <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="I/O" />
+                        <ComboBox Grid.Row="2"
+                                  Grid.Column="1"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceChoices}"
+                                  SelectedItem="{Binding Editor.IoTolerance}" />
+                        <ComboBox Grid.Row="2"
+                                  Grid.Column="2"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceIntervalChoices}"
+                                  SelectedItem="{Binding Editor.IoToleranceInterval}" />
+
+                        <TextBlock Grid.Row="3" Style="{StaticResource FieldLabelStyle}" Text="Network" />
+                        <ComboBox Grid.Row="3"
+                                  Grid.Column="1"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceChoices}"
+                                  SelectedItem="{Binding Editor.NetworkTolerance}" />
+                        <ComboBox Grid.Row="3"
+                                  Grid.Column="2"
+                                  Margin="5,3"
+                                  ItemsSource="{Binding Editor.ToleranceIntervalChoices}"
+                                  SelectedItem="{Binding Editor.NetworkToleranceInterval}" />
+                    </Grid>
+                </GroupBox>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

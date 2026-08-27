@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>Shackles.JobObjects.Tests</AssemblyName>
+    <RootNamespace>Shackles.JobObjects.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.1.0" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Shackles.JobObjects\Shackles.JobObjects.csproj" />
+    <ProjectReference Include="..\Shackles.TestWorker\Shackles.TestWorker.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyTestWorker" AfterTargets="Build">
+    <ItemGroup>
+      <_TestWorkerFiles Include="$(MSBuildProjectDirectory)\..\Shackles.TestWorker\bin\$(Configuration)\net10.0-windows\Shackles.TestWorker.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_TestWorkerFiles)"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>
