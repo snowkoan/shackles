@@ -3,9 +3,9 @@
 <img width="2266" height="1473" alt="image" src="https://github.com/user-attachments/assets/29789762-bf3b-46d2-8dd8-909f94efd50c" />
 
 
-Shackles is a Windows desktop app for creating and inspecting Job Objects, configuring their documented restrictions, and assigning running processes with drag and drop.
+Shackles is a Windows desktop app for placing practical restrictions on processes. It brings supported Windows controls into one understandable interface and reports exactly what Windows accepted or rejected.
 
-The current Job Objects workspace puts running processes beside tool-owned jobs. Drag one or more processes onto a job, review the irreversible-assignment warning, and Shackles applies the assignment and refreshes the job membership. A keyboard-accessible **Assign to job** action is available as well.
+Its first workspace uses Job Objects. It can create or open named jobs, launch new processes directly into a job, configure documented restrictions, and inspect membership, accounting, and notifications. Running processes stay beside the workspace: drag one or more onto a job, or use the keyboard-accessible **Assign to job** action, review the irreversible-assignment warning, and Shackles reports the result for each process before refreshing job membership.
 
 > [!IMPORTANT]
 > Windows does not provide a detach operation. Once a process is assigned successfully, it remains in that job for the rest of the process lifetime. Shackles validates each PID immediately before assignment and reports success or failure separately for every process.
@@ -40,7 +40,7 @@ Prerequisites:
 ```powershell
 dotnet restore Shackles.slnx
 dotnet build Shackles.slnx -c Release
-dotnet run --project src/Shackles.App/Shackles.App.csproj
+dotnet run --project src\Shackles.App\Shackles.App.csproj
 ```
 
 Run the tests with:
@@ -52,23 +52,23 @@ dotnet test Shackles.slnx -c Release
 Create the normal x64 build, which uses the separately installed .NET 10 Desktop Runtime, with:
 
 ```powershell
-dotnet publish src/Shackles.App/Shackles.App.csproj `
+dotnet publish src\Shackles.App\Shackles.App.csproj `
   -c Release `
   -r win-x64 `
   --self-contained false `
   -p:PublishSingleFile=true `
-  -o artifacts/Shackles-win-x64-framework-dependent
+  -o artifacts\Shackles-win-x64-framework-dependent
 ```
 
 Create a self-contained x64 build with:
 
 ```powershell
-dotnet publish src/Shackles.App/Shackles.App.csproj `
+dotnet publish src\Shackles.App\Shackles.App.csproj `
   -c Release `
   -r win-x64 `
   --self-contained true `
   -p:PublishSingleFile=true `
-  -o artifacts/Shackles-win-x64
+  -o artifacts\Shackles-win-x64
 ```
 
 ## What the current Job Objects workspace manages
