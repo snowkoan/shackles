@@ -1,5 +1,7 @@
 # Shackles
 
+<img width="1054" height="959" alt="image" src="https://github.com/user-attachments/assets/efd5550d-4ba7-4eff-8efd-5f6b1d9252a3" />
+
 Shackles is a Windows desktop app for creating and inspecting Job Objects, configuring their documented restrictions, and assigning running processes with drag and drop.
 
 The current Job Objects workspace puts running processes beside tool-owned jobs. Drag one or more processes onto a job, review the irreversible-assignment warning, and Shackles applies the assignment and refreshes the job membership. A keyboard-accessible **Assign to job** action is available as well.
