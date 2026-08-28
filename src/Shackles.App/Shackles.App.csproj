@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Shackles.AppContainers\Shackles.AppContainers.csproj" />
     <ProjectReference Include="..\Shackles.JobObjects\Shackles.JobObjects.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,99 @@
+namespace Shackles.AppContainers;
+
+public enum AppContainerIsolationMode
+{
+    Standard,
+    LowPrivilege
+}
+
+public enum FileSystemGrantAccess
+{
+    ReadExecute,
+    ReadWriteDelete
+}
+
+public enum RegistryGrantAccess
+{
+    Read,
+    ReadWrite
+}
+
+public enum RegistryGrantView
+{
+    Automatic,
+    Registry32,
+    Registry64
+}
+
+public sealed record FileSystemGrant(
+    string Path,
+    bool IsDirectory,
+    FileSystemGrantAccess Access);
+
+public sealed record RegistryGrant(
+    string KeyPath,
+    RegistryGrantAccess Access,
+    RegistryGrantView View);
+
+public sealed record AppContainerSandboxOptions
+{
+    public required string DisplayName { get; init; }
+
+    public AppContainerIsolationMode IsolationMode { get; init; }
+
+    public bool RestrictChildProcessCreation { get; init; }
+
+    public bool UseMinimalEnvironment { get; init; }
+
+    public IReadOnlyList<string> CapabilityNames { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<FileSystemGrant> FileSystemGrants { get; init; } = Array.Empty<FileSystemGrant>();
+
+    public IReadOnlyList<RegistryGrant> RegistryGrants { get; init; } = Array.Empty<RegistryGrant>();
+}
+
+public sealed record AppContainerLaunchOptions(string FileName)
+{
+    public string Arguments { get; init; } = string.Empty;
+
+    public string? WorkingDirectory { get; init; }
+
+    public bool IncludeTargetDirectoryGrant { get; init; } = true;
+}
+
+public sealed record AppContainerLaunchResult(
+    int ProcessId,
+    long CreationTimeFileTimeUtc,
+    IReadOnlyList<string> Warnings);
+
+public sealed record AppContainerCreationResult(
+    AppContainerSandbox Sandbox,
+    AppContainerLaunchResult FirstLaunch);
+
+public sealed record AppContainerSnapshot(
+    string DisplayName,
+    string ProfileName,
+    string Sid,
+    AppContainerSandboxOptions Options,
+    IReadOnlyList<int> ProcessIds,
+    DateTimeOffset CapturedAtUtc,
+    bool IsClosed);
+
+public sealed record AppContainerCleanupResult(
+    string DisplayName,
+    bool Completed,
+    IReadOnlyList<string> Warnings);
+
+public sealed record AppContainerRecoveryResult(
+    int RecoveredSessionCount,
+    IReadOnlyList<string> Warnings);
+
+public sealed class AppContainerSandboxChangedEventArgs : EventArgs
+{
+    public AppContainerSandboxChangedEventArgs(bool closed)
+    {
+        Closed = closed;
+    }
+
+    public bool Closed { get; }
+}

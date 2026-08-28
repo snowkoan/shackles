@@ -28,6 +28,29 @@ public sealed partial class MainWindow : Window, IDisposable
         Loaded += async (_, _) => await _viewModel.InitializeAsync().ConfigureAwait(true);
     }
 
+    private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobObjectsWorkspace is null || AppContainerWorkspace is null)
+        {
+            return;
+        }
+
+        JobObjectsWorkspace.Visibility = Visibility.Visible;
+        AppContainerWorkspace.Visibility = Visibility.Collapsed;
+    }
+
+    private void AppContainerWorkspaceTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobObjectsWorkspace is null || AppContainerWorkspace is null)
+        {
+            return;
+        }
+
+        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
+        AppContainerWorkspace.Visibility = Visibility.Visible;
+        AppContainerWorkspace.PrepareForDisplay();
+    }
+
     private async void NewJob_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new JobNameDialog(openExisting: false) { Owner = this };
@@ -303,7 +326,9 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
+        if (JobObjectsWorkspace.Visibility == Visibility.Visible &&
+            e.Key == Key.Enter &&
+            Keyboard.Modifiers == ModifierKeys.Control)
         {
             AssignSelected_Click(this, new RoutedEventArgs());
             e.Handled = true;
@@ -312,6 +337,18 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (AppContainerWorkspace.IsBusy)
+        {
+            e.Cancel = true;
+            MessageBox.Show(
+                this,
+                "Wait for the current AppContainer operation to finish before closing Shackles.",
+                "Sandbox operation in progress",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
         var busyJobs = _viewModel.Jobs.Where(job => job.IsBusy).Select(job => job.DisplayName).ToArray();
         if (busyJobs.Length > 0)
         {
@@ -329,7 +366,12 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             var killOnCloseJobs = _viewModel.Jobs.Where(job => job.KillOnCloseConfigured).Select(job => job.DisplayName).ToArray();
             var liveNotificationJobs = _viewModel.Jobs.Where(job => job.LiveNotificationOwnerRequiredOnClose).Select(job => job.DisplayName).ToArray();
-            if (killOnCloseJobs.Length > 0 || liveNotificationJobs.Length > 0)
+            var appContainerTrackedCount = AppContainerWorkspace.TrackedLaunchCount;
+            var canHaveUntrackedDescendants =
+                AppContainerWorkspace.CanHaveUntrackedDescendants;
+            if (killOnCloseJobs.Length > 0 ||
+                liveNotificationJobs.Length > 0 ||
+                appContainerTrackedCount > 0)
             {
                 var warnings = new List<string>();
                 if (killOnCloseJobs.Length > 0)
@@ -342,10 +384,21 @@ public sealed partial class MainWindow : Window, IDisposable
                     warnings.Add($"Closing detaches the live completion ports for: {string.Join(", ", liveNotificationJobs)}. If a per-job time limit later expires without another port, Windows falls back to terminating members.");
                 }
 
+                if (appContainerTrackedCount > 0)
+                {
+                    warnings.Add(
+                        $"Closing terminates {appContainerTrackedCount} directly launched AppContainer " +
+                        $"process{(appContainerTrackedCount == 1 ? string.Empty : "es")} " +
+                        $"and cleans up: {string.Join(", ", AppContainerWorkspace.ActiveSandboxNames)}." +
+                        (canHaveUntrackedDescendants
+                            ? " Descendants are not tracked and may continue running."
+                            : string.Empty));
+                }
+
                 var answer = MessageBox.Show(
                     this,
                     $"{string.Join("\n\n", warnings)}\n\nClose Shackles anyway?",
-                    "Closing Shackles may affect job processes",
+                    "Closing Shackles may affect processes",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning,
                     MessageBoxResult.No);
@@ -388,6 +441,7 @@ public sealed partial class MainWindow : Window, IDisposable
         }
 
         _disposed = true;
+        AppContainerWorkspace.Dispose();
         _viewModel.Dispose();
     }
 
