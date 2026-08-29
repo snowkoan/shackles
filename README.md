@@ -3,12 +3,20 @@
 <img width="2266" height="1473" alt="image" src="https://github.com/user-attachments/assets/29789762-bf3b-46d2-8dd8-909f94efd50c" />
 
 
-Shackles is a Windows desktop app for placing practical restrictions on processes. It brings supported Windows controls into one understandable interface and reports exactly what Windows accepted or rejected.
+Shackles is a Windows desktop app for applying and inspecting Windows process restrictions. Each Windows mechanism has its own workspace, with its scope, lifetime, and host effects shown explicitly.
 
-Its first workspace uses Job Objects. It can create or open named jobs, launch new processes directly into a job, configure documented restrictions, and inspect membership, accounting, and notifications. Running processes stay beside the workspace: drag one or more onto a job, or use the keyboard-accessible **Assign to job** action, review the irreversible-assignment warning, and Shackles reports the result for each process before refreshing job membership.
+## Workspaces
+
+| Workspace | Process model | Controls | Lifetime and host effects |
+| --- | --- | --- | --- |
+| **Job Objects** | Attach or launch | Job limits and telemetry | Session-owned kernel object; assignment cannot be undone |
+| **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Profile/SID reused per card; selected grants temporarily change ACLs |
+| **Experimental Sandboxes** | Launch only | Experimental identity, path, network, and UI policy | Dynamically probed; no host ACL changes |
+
+The workspaces are not interchangeable. Job Objects can often accept running processes; identity and sandbox policy must be applied at launch.
 
 > [!IMPORTANT]
-> Windows does not provide a detach operation. Once a process is assigned successfully, it remains in that job for the rest of the process lifetime. Shackles validates each PID immediately before assignment and reports success or failure separately for every process.
+> Windows does not provide a Job Object detach operation. Once a process is assigned successfully, it remains in that job for the rest of the process lifetime. Shackles validates each PID immediately before assignment and reports success or failure separately for every process.
 
 ## Runtime requirement
 
@@ -70,6 +78,52 @@ dotnet publish src\Shackles.App\Shackles.App.csproj `
   -p:PublishSingleFile=true `
   -o artifacts\Shackles-win-x64
 ```
+
+## App Containers workspace
+
+Each card creates a unique profile and SID on its first successful launch; later launches reuse that identity and policy. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and file or registry grants.
+
+> [!IMPORTANT]
+> A file or registry grant adds an explicit allow ACE for the sandbox SID. Drafts do not change the host. Before applying a grant, Shackles journals it; closing the card or app terminates launched roots, removes tracked ACEs, and deletes the profile. Cleanup is best effort and retried on the next run if needed.
+
+Network connectivity and `enterpriseAuthentication` are separate; SMB access still depends on normal share, filesystem, firewall, and domain policy. Children remain in the boundary, but Shackles tracks only directly launched roots.
+
+## Experimental process sandboxes workspace
+
+This launch-only workspace calls `Experimental_CreateProcessInSandbox` directly, with no MXC or AppContainer fallback. Shackles probes the exports and `Experimental_QuerySandboxSupport` at runtime, disabling **New sandbox** unless Windows advertises process creation.
+
+The current policy covers optional AppContainer/LPAC identity, integrity, Win32k and UI limits, native filesystem rules, network/proxy capabilities, and environment handling. Native path rules do not change host ACLs. Each launch receives a separate OS-managed job whose handle the API does not expose.
+
+> [!WARNING]
+> This API is experimental and build-dependent. The support query is authoritative; Shackles never writes feature overrides or fabricates support.
+
+### Enablement research
+
+On Windows 11 25H2 build `26200.9106`, `processmodel.dll` exported both APIs but the support mask was `0`; MXC 0.8 selected its `appcontainer-dacl` fallback. Public symbols showed this feature chain:
+
+Public symbols for that DLL showed this effective feature chain:
+
+| Feature ID | Symbolic name | Observed state |
+| --- | --- | --- |
+| `61155944` | `ProjectTessera_CreateProcessInSandbox` | Enabled by user override |
+| `61389575` | `Tessera_202605Retail` | Enabled by user override |
+| `48433719` | `UxAccOptimization` | Disabled at image default |
+
+Forcing only the final gate in a disposable debugger process changed the mask from `0` to `1`, confirming the immediate cause without changing the host.
+
+For research machines, the corresponding unsupported ViVeTool experiment is:
+
+```powershell
+ViVeTool.exe /enable /id:61155944,61389575,48433719
+```
+
+This is research only, not a Shackles setup step. `48433719` is a broad rollout dependency, overrides may be ignored, and internal IDs can change. Prefer a disposable Insider/Experimental build `26600+`, as described in the [MXC support matrix](https://github.com/microsoft/mxc/blob/main/docs/process-container/os-version-support.md), then verify after reboot:
+
+```powershell
+wxc-exec.exe --probe
+```
+
+MXC should report `"tier": "base-container"`, and Shackles should show support bit `0x1`. Do not patch `processmodel.dll` or weaken Secure Boot/Test Signing to force the API.
 
 ## What the current Job Objects workspace manages
 
@@ -139,10 +193,14 @@ Completion messages are a live convenience view, not an event ledger. Windows gu
 
 ## Existing tools
 
-If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/process-governor) already provides a good command-line experience for common CPU, memory, affinity, time, and priority limits. [System Informer](https://github.com/winsiderss/systeminformer) and [Process Explorer](https://learn.microsoft.com/en-us/sysinternals/downloads/process-explorer) are strong inspectors. None of them combines drag-and-drop assignment with a complete, editable view of the documented restriction classes, which is the gap Shackles is intended to fill.
+If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/process-governor) already provides a good command-line experience for common CPU, memory, affinity, time, and priority limits. [System Informer](https://github.com/winsiderss/systeminformer) and [Process Explorer](https://learn.microsoft.com/en-us/sysinternals/downloads/process-explorer) are strong inspectors. [Microsoft Execution Containers (MXC)](https://github.com/microsoft/mxc) provides a policy-driven execution layer with Windows fallback tiers and is a useful compatibility reference for the experimental workspace. Shackles focuses on an interactive, mechanism-specific view of requested and effective state rather than replacing those tools.
 
 ## Windows API references
 
+- [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation)
+- [`CreateAppContainerProfile`](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createappcontainerprofile)
+- [`PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`](https://learn.microsoft.com/en-us/windows/win32/procthread/attribute-list)
+- [Create Process in Sandbox APIs](https://learn.microsoft.com/en-us/windows/win32/secauthz/createprocessinsandbox)
 - [Job Objects overview](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 - [`SetInformationJobObject`](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-setinformationjobobject)
 - [`QueryInformationJobObject`](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
@@ -156,4 +214,4 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 ## Security notes
 
-Shackles requests the minimum job and process rights needed for each operation, uses owning safe handles for native resources, validates all numeric and textual input, and rechecks process identity before assignment to reduce PID-reuse mistakes. It contains no credentials, cryptographic material, or certificate data.
+Shackles requests the minimum job, process, token, and ACL rights needed for each operation, uses owning safe handles for native resources, validates all numeric and textual input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL intent is journaled before mutation and cleanup removes entries only when their SID and expected access match the tracked grant. Experimental feature state is queried, never written. Shackles contains no credentials, cryptographic material, or certificate data.

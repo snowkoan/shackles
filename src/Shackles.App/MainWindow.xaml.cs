@@ -30,25 +30,48 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null || AppContainerWorkspace is null)
+        if (JobObjectsWorkspace is null ||
+            AppContainerWorkspace is null ||
+            ExperimentalSandboxWorkspace is null)
         {
             return;
         }
 
         JobObjectsWorkspace.Visibility = Visibility.Visible;
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
+        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
     }
 
     private void AppContainerWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null || AppContainerWorkspace is null)
+        if (JobObjectsWorkspace is null ||
+            AppContainerWorkspace is null ||
+            ExperimentalSandboxWorkspace is null)
         {
             return;
         }
 
         JobObjectsWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.Visibility = Visibility.Visible;
+        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.PrepareForDisplay();
+    }
+
+    private void ExperimentalSandboxWorkspaceTab_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (JobObjectsWorkspace is null ||
+            AppContainerWorkspace is null ||
+            ExperimentalSandboxWorkspace is null)
+        {
+            return;
+        }
+
+        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
+        AppContainerWorkspace.Visibility = Visibility.Collapsed;
+        ExperimentalSandboxWorkspace.Visibility = Visibility.Visible;
+        ExperimentalSandboxWorkspace.PrepareForDisplay();
     }
 
     private async void NewJob_Click(object sender, RoutedEventArgs e)
@@ -337,12 +360,15 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (AppContainerWorkspace.IsBusy)
+        if (AppContainerWorkspace.IsBusy || ExperimentalSandboxWorkspace.IsBusy)
         {
             e.Cancel = true;
+            var workspace = AppContainerWorkspace.IsBusy
+                ? "AppContainer"
+                : "experimental sandbox";
             MessageBox.Show(
                 this,
-                "Wait for the current AppContainer operation to finish before closing Shackles.",
+                $"Wait for the current {workspace} operation to finish before closing Shackles.",
                 "Sandbox operation in progress",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -369,9 +395,12 @@ public sealed partial class MainWindow : Window, IDisposable
             var appContainerTrackedCount = AppContainerWorkspace.TrackedLaunchCount;
             var canHaveUntrackedDescendants =
                 AppContainerWorkspace.CanHaveUntrackedDescendants;
+            var experimentalTrackedCount =
+                ExperimentalSandboxWorkspace.TrackedLaunchCount;
             if (killOnCloseJobs.Length > 0 ||
                 liveNotificationJobs.Length > 0 ||
-                appContainerTrackedCount > 0)
+                appContainerTrackedCount > 0 ||
+                experimentalTrackedCount > 0)
             {
                 var warnings = new List<string>();
                 if (killOnCloseJobs.Length > 0)
@@ -393,6 +422,17 @@ public sealed partial class MainWindow : Window, IDisposable
                         (canHaveUntrackedDescendants
                             ? " Descendants are not tracked and may continue running."
                             : string.Empty));
+                }
+
+                if (experimentalTrackedCount > 0)
+                {
+                    warnings.Add(
+                        $"Closing terminates {experimentalTrackedCount} directly launched " +
+                        $"experimental sandbox process" +
+                        $"{(experimentalTrackedCount == 1 ? string.Empty : "es")} " +
+                        $"and cleans up: {string.Join(", ", ExperimentalSandboxWorkspace.ActiveSandboxNames)}. " +
+                        "The experimental API does not expose its internal Job Objects, " +
+                        "so descendant lifetime cannot be inspected by Shackles.");
                 }
 
                 var answer = MessageBox.Show(
@@ -442,6 +482,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _disposed = true;
         AppContainerWorkspace.Dispose();
+        ExperimentalSandboxWorkspace.Dispose();
         _viewModel.Dispose();
     }
 

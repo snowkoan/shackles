@@ -45,6 +45,12 @@
                                          Checked="AppContainerWorkspaceTab_Click"
                                          Content="_AppContainer"
                                          AutomationProperties.Name="Show AppContainer workspace" />
+                            <RadioButton x:Name="ExperimentalSandboxWorkspaceTab"
+                                         GroupName="Workspace"
+                                         Style="{StaticResource WorkspaceTabStyle}"
+                                         Checked="ExperimentalSandboxWorkspaceTab_Click"
+                                         Content="_Experimental Sandbox"
+                                         AutomationProperties.Name="Show experimental process sandbox workspace" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -320,6 +326,8 @@
 
             <views:AppContainerWorkspaceView x:Name="AppContainerWorkspace"
                                              Visibility="Collapsed" />
+            <views:ExperimentalSandboxWorkspaceView x:Name="ExperimentalSandboxWorkspace"
+                                                    Visibility="Collapsed" />
         </Grid>
     </DockPanel>
 </Window>
