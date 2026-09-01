@@ -24,6 +24,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         InitializeComponent();
         SandboxList.ItemsSource = _cards;
         _manager = new AppContainerManager();
+        ConfigureBrokeredFileSystemSurface();
         _isReady = true;
         UpdateEmptyStates();
     }
@@ -149,6 +150,10 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             SandboxNameTextBox.Text = draft.Name;
             StandardIsolationRadio.IsChecked = !draft.UseLowPrivilege;
             LpacIsolationRadio.IsChecked = draft.UseLowPrivilege;
+            FileSystemAclRadio.IsChecked = draft.FileSystemPolicyBackend ==
+                AppContainerFileSystemPolicyBackend.AccessControlLists;
+            BrokeredFileSystemRadio.IsChecked = draft.FileSystemPolicyBackend ==
+                AppContainerFileSystemPolicyBackend.BrokeredFileSystem;
             AllowChildrenCheckBox.IsChecked = draft.AllowChildren;
             MinimalEnvironmentCheckBox.IsChecked = draft.UseMinimalEnvironment;
             ExecutablePathTextBox.Text = draft.ExecutablePath;
@@ -210,6 +215,10 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
         draft.Name = SandboxNameTextBox.Text;
         draft.UseLowPrivilege = LpacIsolationRadio.IsChecked == true;
+        draft.FileSystemPolicyBackend =
+            BrokeredFileSystemRadio.IsChecked == true
+                ? AppContainerFileSystemPolicyBackend.BrokeredFileSystem
+                : AppContainerFileSystemPolicyBackend.AccessControlLists;
         draft.AllowChildren = AllowChildrenCheckBox.IsChecked == true;
         draft.UseMinimalEnvironment = MinimalEnvironmentCheckBox.IsChecked == true;
         draft.InternetClient = InternetClientCheckBox.IsChecked == true;
@@ -278,18 +287,39 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             ? "None"
             : $"{draft.CuratedCapabilityCount} curated";
 
-        var explicitAclGrantCount =
-            draft.FileGrants.Count + draft.RegistryGrants.Count;
-        var explicitAclSummary = explicitAclGrantCount == 0
-            ? "No explicit ACL grants"
-            : $"{explicitAclGrantCount} temporary ACL grant" +
-              (explicitAclGrantCount == 1 ? string.Empty : "s");
-        HostChangesSummaryText.Text = explicitAclSummary +
-            (draft.IncludeTargetAccess
-                ? "; executable folder may also receive one"
-                : string.Empty);
-
         var snapshot = _loadedCard.Snapshot;
+        var fileSystemBackend = snapshot?.Options.FileSystemPolicyBackend ??
+                                draft.FileSystemPolicyBackend;
+        UpdateFileSystemPolicyText(fileSystemBackend);
+        var fileCount = draft.FileGrants.Count;
+        var fileSummary = fileSystemBackend ==
+                          AppContainerFileSystemPolicyBackend.BrokeredFileSystem
+            ? fileCount == 0
+                ? "No explicit BFS path rules"
+                : $"{fileCount} brokered path rule" +
+                  (fileCount == 1 ? string.Empty : "s")
+            : fileCount == 0
+                ? "No explicit file ACL grants"
+                : $"{fileCount} temporary file ACL grant" +
+                  (fileCount == 1 ? string.Empty : "s");
+        if (draft.IncludeTargetAccess)
+        {
+            fileSummary += "; executable folder may also receive one";
+        }
+
+        if (fileSystemBackend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem)
+        {
+            fileSummary += "; file ACLs unchanged";
+        }
+
+        var registryCount = draft.RegistryGrants.Count;
+        var registrySummary = registryCount == 0
+            ? "No registry ACL grants"
+            : $"{registryCount} temporary registry ACL grant" +
+              (registryCount == 1 ? string.Empty : "s");
+        HostChangesSummaryText.Text = fileSummary + ". " + registrySummary + ".";
+
         var processIds = snapshot?.ProcessIds ?? Array.Empty<int>();
         MemberCountSummaryText.Text = processIds.Count.ToString(
             System.Globalization.CultureInfo.InvariantCulture);
@@ -298,10 +328,57 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             .ToArray();
         CleanupSummaryText.Text =
             "When Shackles exits or you close this sandbox, Shackles terminates tracked launches, " +
-            "removes tracked grants, and deletes the generated profile." +
+            (fileSystemBackend ==
+             AppContainerFileSystemPolicyBackend.BrokeredFileSystem
+                ? "clears the brokered file policy, removes registry grants, "
+                : "removes tracked ACL grants, ") +
+            "and deletes the generated profile." +
             (draft.AllowChildren
                 ? " Descendants are not tracked and may continue running."
                 : string.Empty);
+    }
+
+    private void ConfigureBrokeredFileSystemSurface()
+    {
+        var support = _manager.BrokeredFileSystemSupport;
+        BrokeredFileSystemRadio.IsEnabled = support.IsAvailable;
+        BrokeredFileSystemRadio.ToolTip = support.Summary;
+        BfsSupportText.Text = support.Summary +
+            (support.Warnings.Count == 0
+                ? string.Empty
+                : " " + string.Join(" ", support.Warnings));
+    }
+
+    private void UpdateFileSystemPolicyText(
+        AppContainerFileSystemPolicyBackend backend)
+    {
+        if (backend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem)
+        {
+            FileSystemPolicyHeadingText.Text =
+                "Brokered File System path rules (experimental)";
+            FileSystemPolicyDescriptionText.Text =
+                "Shackles asks the OS-shipped bfscfg.exe to associate each path " +
+                "with this AppContainer profile. A folder rule is requested for " +
+                "its descendants. Policy is cleared when the final directly " +
+                "tracked process exits and reapplied for a later launch.";
+            FileSystemPolicyRequirementText.Text =
+                "The path must already exist. BFS does not change its ACL. Tool " +
+                "presence is not a support contract, and Windows may reject or " +
+                "stall an operation.";
+            return;
+        }
+
+        FileSystemPolicyHeadingText.Text =
+            "Temporary file-system ACL grants";
+        FileSystemPolicyDescriptionText.Text =
+            "When the sandbox is created, Shackles adds an explicit allow entry " +
+            "for its SID. A folder entry applies to that folder and inherits to " +
+            "child files and folders. The entry is removed when the final " +
+            "directly tracked process exits and reapplied for a later launch.";
+        FileSystemPolicyRequirementText.Text =
+            "The path must already exist, and Shackles must have permission to " +
+            "change its ACL. Content write access alone is not sufficient.";
     }
 
     private void PreviewOption_Changed(object sender, RoutedEventArgs e) =>
@@ -445,7 +522,11 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         FileSystemPathTextBox.Clear();
         RefreshPreview();
         ShowNotice(
-            "Pending file-system ACL grant added. Host permissions do not change until the sandbox is created.");
+            _loadedCard.Draft.FileSystemPolicyBackend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem
+                ? "Pending BFS path rule added. The host ACL was not changed."
+                : "Pending file-system ACL grant added. Host permissions do not " +
+                  "change until the sandbox is created.");
     }
 
     private void RemoveFileGrant_Click(object sender, RoutedEventArgs e)
@@ -543,6 +624,14 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             return;
         }
 
+        if (_loadedCard.Sandbox is null &&
+            _loadedCard.Draft.FileSystemPolicyBackend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem &&
+            !ConfirmBrokeredFileSystemExperiment())
+        {
+            return;
+        }
+
         var card = _loadedCard;
         SetBusy(true);
         try
@@ -579,8 +668,20 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
         catch (Exception exception)
         {
+            var brokeredFileSystemFailure =
+                exception is AppContainerException
+                {
+                    Operation:
+                        AppContainerOperation.ConfigureBrokeredFileSystem
+                };
             ShowNotice(
-                card.IsActive
+                brokeredFileSystemFailure && card.IsActive
+                    ? "Launch stopped before process creation. The BFS update may " +
+                      "be uncertain; close the sandbox to force policy cleanup."
+                    : brokeredFileSystemFailure
+                    ? "Launch failed before process creation. Shackles attempted " +
+                      "to clear BFS policy; review the error for cleanup details."
+                    : card.IsActive
                     ? "Launch failed. The existing sandbox remains available."
                     : "Launch failed. The new profile and tracked grants were cleaned up; the draft remains editable.");
             MessageBox.Show(
@@ -601,6 +702,25 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
                 RefreshPreview();
             }
         }
+    }
+
+    private bool ConfirmBrokeredFileSystemExperiment()
+    {
+        var support = _manager.BrokeredFileSystemSupport;
+        var warnings = support.Warnings.Count == 0
+            ? string.Empty
+            : Environment.NewLine + Environment.NewLine +
+              string.Join(Environment.NewLine + Environment.NewLine, support.Warnings);
+        return MessageBox.Show(
+                   Window.GetWindow(this),
+                   "Continue with the Brokered File System experiment? " +
+                   "Shackles will run the OS-shipped bfscfg.exe with a 10-second " +
+                   "process timeout. A kernel-side stall may outlive that timeout." +
+                   warnings,
+                   "Use experimental Brokered File System policy",
+                   MessageBoxButton.YesNo,
+                   MessageBoxImage.Warning,
+                   MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private async void CloseSandbox_Click(object sender, RoutedEventArgs e)
@@ -712,6 +832,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             IsolationMode = draft.UseLowPrivilege
                 ? AppContainerIsolationMode.LowPrivilege
                 : AppContainerIsolationMode.Standard,
+            FileSystemPolicyBackend = draft.FileSystemPolicyBackend,
             RestrictChildProcessCreation = !draft.AllowChildren,
             UseMinimalEnvironment = draft.UseMinimalEnvironment,
             CapabilityNames = capabilities,
@@ -757,6 +878,16 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         {
             ShowNotice("Give the sandbox a name before creating it.");
             SandboxNameTextBox.Focus();
+            return false;
+        }
+
+        if (_loadedCard?.IsActive != true &&
+            draft.FileSystemPolicyBackend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem &&
+            !_manager.BrokeredFileSystemSupport.IsAvailable)
+        {
+            ShowNotice(_manager.BrokeredFileSystemSupport.Summary);
+            BrokeredFileSystemRadio.Focus();
             return false;
         }
 
@@ -839,6 +970,28 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             if (ReferenceEquals(_loadedCard, card))
             {
                 RefreshPreview();
+            }
+
+            if (eventArgs.ResourcePolicyCleanupAttempted)
+            {
+                if (eventArgs.CleanupWarnings.Count == 0)
+                {
+                    ShowNotice(
+                        "The sandbox is idle. Its temporary ACL and BFS policy " +
+                        "changes were removed; the profile remains available " +
+                        "for another launch.");
+                }
+                else
+                {
+                    MessageBox.Show(
+                        Window.GetWindow(this),
+                        string.Join(
+                            Environment.NewLine + Environment.NewLine,
+                            eventArgs.CleanupWarnings),
+                        "Automatic sandbox cleanup was incomplete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
             }
         });
     }

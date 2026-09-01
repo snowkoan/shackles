@@ -12,6 +12,33 @@ public enum FileSystemGrantAccess
     ReadWriteDelete
 }
 
+public enum AppContainerFileSystemPolicyBackend
+{
+    AccessControlLists,
+    BrokeredFileSystem
+}
+
+public enum BrokeredFileSystemAvailability
+{
+    Available,
+    PlatformNotSupported,
+    WindowsDirectoryUnavailable,
+    ConfigurationToolMissing
+}
+
+public sealed record BrokeredFileSystemSupport(
+    BrokeredFileSystemAvailability Availability,
+    string Summary,
+    Version OsVersion,
+    string? ConfigurationToolPath,
+    string? DriverPath,
+    bool DriverFilePresent,
+    IReadOnlyList<string> Warnings)
+{
+    public bool IsAvailable =>
+        Availability == BrokeredFileSystemAvailability.Available;
+}
+
 public enum RegistryGrantAccess
 {
     Read,
@@ -40,6 +67,8 @@ public sealed record AppContainerSandboxOptions
     public required string DisplayName { get; init; }
 
     public AppContainerIsolationMode IsolationMode { get; init; }
+
+    public AppContainerFileSystemPolicyBackend FileSystemPolicyBackend { get; init; }
 
     public bool RestrictChildProcessCreation { get; init; }
 
@@ -91,9 +120,26 @@ public sealed record AppContainerRecoveryResult(
 public sealed class AppContainerSandboxChangedEventArgs : EventArgs
 {
     public AppContainerSandboxChangedEventArgs(bool closed)
+        : this(
+            closed,
+            resourcePolicyCleanupAttempted: false,
+            Array.Empty<string>())
+    {
+    }
+
+    internal AppContainerSandboxChangedEventArgs(
+        bool closed,
+        bool resourcePolicyCleanupAttempted,
+        IReadOnlyList<string> cleanupWarnings)
     {
         Closed = closed;
+        ResourcePolicyCleanupAttempted = resourcePolicyCleanupAttempted;
+        CleanupWarnings = cleanupWarnings;
     }
 
     public bool Closed { get; }
+
+    public bool ResourcePolicyCleanupAttempted { get; }
+
+    public IReadOnlyList<string> CleanupWarnings { get; }
 }

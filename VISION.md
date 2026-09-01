@@ -15,14 +15,14 @@ The interface stays calm and readable. Detailed evidence appears when useful, an
 ## Current workspaces
 
 - **Job Objects:** attach compatible processes or launch new ones, apply documented limits, and inspect telemetry. Assignment is irreversible and ownership is session-scoped.
-- **App Containers:** launch into a reusable per-card SID with AppContainer/LPAC policy, capabilities, and explicit resource grants. ACL changes are journaled and cleanup is best effort.
+- **App Containers:** launch with a reusable per-card SID, AppContainer/LPAC policy, capabilities, and explicit resource grants. File rules can use temporary SID ACLs or experimental BFS. BFS gives agent-style processes path-specific access without changing target ACLs by combining the required `AgenticAppContainer` token capability with per-profile broker policy. Registry access remains ACL-based. Temporary policy is released when the sandbox becomes idle; the profile remains reusable.
 - **Experimental Sandboxes:** call the dynamically probed Windows API directly for identity, path, network, and UI policy without ACL changes. Shackles neither falls back nor enables internal feature IDs.
 
 The mechanisms remain separate. Unsupported features stay unavailable rather than being emulated.
 
 ## Possible direction
 
-1. Improve diagnostics, verified read-back, cleanup evidence, and reusable configurations.
+1. Improve diagnostics, verified policy read-back, cleanup evidence, and reusable configurations.
 2. Generalize launch targets across Win32 paths, packaged Win32 apps, and UWP activation by querying the system dynamically.
 3. Add reversible controls such as EcoQoS, memory priority, affinity, and preferred processors.
 4. Explore a separate Windows Filtering Platform workspace for executable- or user-scoped network blocking.

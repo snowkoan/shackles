@@ -7,7 +7,7 @@ namespace Shackles.AppContainers.Internal;
 
 internal sealed record CleanupJournalRecord
 {
-    public int FormatVersion { get; init; } = 1;
+    public int FormatVersion { get; init; } = 2;
 
     public required int OwnerProcessId { get; init; }
 
@@ -19,11 +19,18 @@ internal sealed record CleanupJournalRecord
 
     public required string Sid { get; init; }
 
+    public AppContainerFileSystemPolicyBackend FileSystemPolicyBackend { get; init; }
+
+    public bool BrokeredFileSystemPolicyMayExist { get; init; }
+
     public List<TrackedAclGrant> Grants { get; init; } = [];
 }
 
 internal sealed class CleanupJournal
 {
+    private const int PersistMoveAttemptCount = 5;
+    private const int PersistMoveRetryDelayMilliseconds = 20;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true
@@ -49,7 +56,9 @@ internal sealed class CleanupJournal
     internal static CleanupJournal Create(
         string directory,
         AppContainerIdentity identity,
-        string displayName)
+        string displayName,
+        AppContainerFileSystemPolicyBackend fileSystemPolicyBackend =
+            AppContainerFileSystemPolicyBackend.AccessControlLists)
     {
         Directory.CreateDirectory(directory);
         using var current = Process.GetCurrentProcess();
@@ -59,7 +68,8 @@ internal sealed class CleanupJournal
             OwnerCreationTimeFileTimeUtc = current.StartTime.ToUniversalTime().ToFileTimeUtc(),
             DisplayName = displayName,
             ProfileName = identity.ProfileName,
-            Sid = identity.Sid
+            Sid = identity.Sid,
+            FileSystemPolicyBackend = fileSystemPolicyBackend
         };
         var path = System.IO.Path.Combine(directory, $"{identity.ProfileName}.json");
         var journal = new CleanupJournal(path, record);
@@ -81,6 +91,64 @@ internal sealed class CleanupJournal
         }
     }
 
+    internal void Untrack(TrackedAclGrant grant)
+    {
+        lock (_gate)
+        {
+            var remaining = _record.Grants
+                .Where(item => !string.Equals(
+                    item.Key,
+                    grant.Key,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (remaining.Count == _record.Grants.Count)
+            {
+                return;
+            }
+
+            var updated = _record with
+            {
+                Grants = remaining
+            };
+            PersistRecord(_path, updated);
+            _record = updated;
+        }
+    }
+
+    internal void MarkBrokeredFileSystemPolicyMayExist()
+    {
+        lock (_gate)
+        {
+            if (_record.BrokeredFileSystemPolicyMayExist)
+            {
+                return;
+            }
+
+            _record = _record with
+            {
+                BrokeredFileSystemPolicyMayExist = true
+            };
+            PersistCore();
+        }
+    }
+
+    internal void MarkBrokeredFileSystemPolicyCleared()
+    {
+        lock (_gate)
+        {
+            if (!_record.BrokeredFileSystemPolicyMayExist)
+            {
+                return;
+            }
+
+            _record = _record with
+            {
+                BrokeredFileSystemPolicyMayExist = false
+            };
+            PersistCore();
+        }
+    }
+
     internal void Delete()
     {
         lock (_gate)
@@ -89,8 +157,11 @@ internal sealed class CleanupJournal
         }
     }
 
-    internal static AppContainerRecoveryResult RecoverStale(string directory)
+    internal static AppContainerRecoveryResult RecoverStale(
+        string directory,
+        IBrokeredFileSystemConfigurator brokeredFileSystem)
     {
+        ArgumentNullException.ThrowIfNull(brokeredFileSystem);
         if (!Directory.Exists(directory))
         {
             return new AppContainerRecoveryResult(0, Array.Empty<string>());
@@ -126,6 +197,37 @@ internal sealed class CleanupJournal
             }
 
             var cleanupWarnings = new List<string>();
+            var canDeleteProfile = true;
+            if (record.FormatVersion >= 2 &&
+                record.BrokeredFileSystemPolicyMayExist)
+            {
+                var warning = brokeredFileSystem.TryClearPolicy(
+                    record.ProfileName);
+                if (warning is null)
+                {
+                    try
+                    {
+                        record = record with
+                        {
+                            BrokeredFileSystemPolicyMayExist = false
+                        };
+                        PersistRecord(path, record);
+                    }
+                    catch (Exception exception)
+                    {
+                        canDeleteProfile = false;
+                        cleanupWarnings.Add(
+                            "BFS policy was cleared, but its cleanup state could " +
+                            "not be journaled: " + exception.Message);
+                    }
+                }
+                else
+                {
+                    canDeleteProfile = false;
+                    cleanupWarnings.Add(warning);
+                }
+            }
+
             foreach (var grant in record.Grants.AsEnumerable().Reverse())
             {
                 var warning = AclGrantManager.TryRevoke(grant, sidBytes);
@@ -135,10 +237,20 @@ internal sealed class CleanupJournal
                 }
             }
 
-            var profileWarning = AppContainerIdentity.TryDelete(record.ProfileName);
-            if (profileWarning is not null)
+            if (canDeleteProfile)
             {
-                cleanupWarnings.Add(profileWarning);
+                var profileWarning = AppContainerIdentity.TryDelete(
+                    record.ProfileName);
+                if (profileWarning is not null)
+                {
+                    cleanupWarnings.Add(profileWarning);
+                }
+            }
+            else
+            {
+                cleanupWarnings.Add(
+                    $"The AppContainer profile '{record.ProfileName}' was retained " +
+                    "so Brokered File System cleanup can be retried.");
             }
 
             if (cleanupWarnings.Count == 0)
@@ -172,11 +284,39 @@ internal sealed class CleanupJournal
 
     private void PersistCore()
     {
-        var temporaryPath = $"{_path}.{Guid.NewGuid():N}.tmp";
+        PersistRecord(_path, _record);
+    }
+
+    private static void PersistRecord(
+        string path,
+        CleanupJournalRecord record)
+    {
+        var temporaryPath = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(_record, SerializerOptions));
-            File.Move(temporaryPath, _path, overwrite: true);
+            File.WriteAllText(
+                temporaryPath,
+                JsonSerializer.Serialize(record, SerializerOptions));
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    File.Move(temporaryPath, path, overwrite: true);
+                    break;
+                }
+                catch (IOException) when (attempt < PersistMoveAttemptCount)
+                {
+                    Thread.Sleep(PersistMoveRetryDelayMilliseconds);
+                }
+                catch (UnauthorizedAccessException) when (
+                    attempt < PersistMoveAttemptCount)
+                {
+                    // Security and indexing software can briefly open a newly
+                    // replaced journal without delete sharing. Keep the atomic
+                    // same-directory move, but tolerate that bounded race.
+                    Thread.Sleep(PersistMoveRetryDelayMilliseconds);
+                }
+            }
         }
         finally
         {
@@ -192,12 +332,22 @@ internal sealed class CleanupJournal
     {
         sidBytes = Array.Empty<byte>();
         error = null;
-        if (record.FormatVersion != 1 ||
+        if (record.FormatVersion is < 1 or > 2 ||
             string.IsNullOrWhiteSpace(record.ProfileName) ||
             string.IsNullOrWhiteSpace(record.Sid) ||
             record.Grants is null)
         {
             error = "required cleanup fields are missing or unsupported";
+            return false;
+        }
+
+        if (record.FormatVersion >= 2 &&
+            (!Enum.IsDefined(record.FileSystemPolicyBackend) ||
+             record.BrokeredFileSystemPolicyMayExist &&
+             record.FileSystemPolicyBackend !=
+             AppContainerFileSystemPolicyBackend.BrokeredFileSystem))
+        {
+            error = "the file-system cleanup state is inconsistent";
             return false;
         }
 

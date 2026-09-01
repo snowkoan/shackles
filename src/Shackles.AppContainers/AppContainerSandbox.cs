@@ -9,8 +9,11 @@ public sealed class AppContainerSandbox : IDisposable
     private readonly AppContainerIdentity _identity;
     private readonly IReadOnlyList<byte[]> _capabilitySids;
     private readonly CleanupJournal _journal;
-    private readonly List<TrackedAclGrant> _grants = [];
+    private readonly IBrokeredFileSystemConfigurator _brokeredFileSystem;
+    private readonly List<TrackedAclGrant> _aclGrants = [];
+    private readonly List<TrackedAclGrant> _brokeredFileSystemGrants = [];
     private readonly List<TrackedAppContainerProcess> _processes = [];
+    private bool _brokeredFileSystemPolicyMayExist;
     private bool _closed;
     private bool _closing;
     private AppContainerCleanupResult? _cleanupResult;
@@ -19,12 +22,14 @@ public sealed class AppContainerSandbox : IDisposable
         AppContainerIdentity identity,
         IReadOnlyList<byte[]> capabilitySids,
         AppContainerSandboxOptions options,
-        CleanupJournal journal)
+        CleanupJournal journal,
+        IBrokeredFileSystemConfigurator brokeredFileSystem)
     {
         _identity = identity;
         _capabilitySids = capabilitySids;
         Options = options;
         _journal = journal;
+        _brokeredFileSystem = brokeredFileSystem;
     }
 
     public event EventHandler<AppContainerSandboxChangedEventArgs>? Changed;
@@ -67,7 +72,19 @@ public sealed class AppContainerSandbox : IDisposable
                     "remain inside the AppContainer but are not owned by it.");
             }
 
+            EnsureConfiguredGrants();
             AddTargetGrantIfNeeded(options, warnings);
+            if (_brokeredFileSystemPolicyMayExist)
+            {
+                warnings.Add(
+                    "File access uses experimental Brokered File System policy; " +
+                    "Shackles did not add file ACL entries for these rules.");
+                warnings.Add(
+                    "The process token includes the AgenticAppContainer " +
+                    "capability required by bfs.sys.");
+                warnings.AddRange(_brokeredFileSystem.Support.Warnings);
+            }
+
             var process = AppContainerLauncher.Launch(
                 _identity,
                 _capabilitySids,
@@ -107,7 +124,6 @@ public sealed class AppContainerSandbox : IDisposable
 
     public AppContainerSnapshot GetSnapshot()
     {
-        var exited = new List<TrackedAppContainerProcess>();
         int[] processIds;
         bool closed;
         lock (_stateGate)
@@ -119,34 +135,21 @@ public sealed class AppContainerSandbox : IDisposable
             }
             else
             {
-                for (var index = _processes.Count - 1; index >= 0; index--)
-                {
-                    var process = _processes[index];
-                    try
-                    {
-                        if (!process.HasExited)
-                        {
-                            continue;
-                        }
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-
-                    _processes.RemoveAt(index);
-                    exited.Add(process);
-                }
-
                 processIds = _processes
+                    .Where(process =>
+                    {
+                        try
+                        {
+                            return !process.HasExited;
+                        }
+                        catch
+                        {
+                            return true;
+                        }
+                    })
                     .Select(process => process.ProcessId)
                     .ToArray();
             }
-        }
-
-        foreach (var process in exited)
-        {
-            process.Dispose();
         }
 
         return new AppContainerSnapshot(
@@ -221,21 +224,21 @@ public sealed class AppContainerSandbox : IDisposable
                 }
             }
 
-            foreach (var grant in _grants.AsEnumerable().Reverse())
+            var canDeleteProfile = ReleaseResourcePolicy(warnings);
+
+            if (canDeleteProfile)
             {
-                var warning = AclGrantManager.TryRevoke(
-                    grant,
-                    _identity.SidBytes);
-                if (warning is not null)
+                var profileWarning = AppContainerIdentity.TryDelete(ProfileName);
+                if (profileWarning is not null)
                 {
-                    warnings.Add(warning);
+                    warnings.Add(profileWarning);
                 }
             }
-
-            var profileWarning = AppContainerIdentity.TryDelete(ProfileName);
-            if (profileWarning is not null)
+            else
             {
-                warnings.Add(profileWarning);
+                warnings.Add(
+                    $"The AppContainer profile '{ProfileName}' was retained so " +
+                    "Brokered File System cleanup can be retried on the next run.");
             }
 
             if (warnings.Count == 0)
@@ -278,6 +281,19 @@ public sealed class AppContainerSandbox : IDisposable
         }
     }
 
+    private void EnsureConfiguredGrants()
+    {
+        foreach (var grant in Options.FileSystemGrants)
+        {
+            AddGrant(AclGrantManager.Normalize(grant));
+        }
+
+        foreach (var grant in Options.RegistryGrants)
+        {
+            AddGrant(AclGrantManager.Normalize(grant));
+        }
+    }
+
     private void AddTargetGrantIfNeeded(
         AppContainerLaunchOptions options,
         List<string> warnings)
@@ -296,8 +312,8 @@ public sealed class AppContainerSandbox : IDisposable
         {
             warnings.Add(
                 "The executable is in a Windows-managed program folder, so " +
-                "Shackles used its existing package access instead of changing " +
-                "that folder's ACL.");
+                "Shackles used its existing AppContainer package access instead " +
+                "of adding another file-access policy entry.");
             return;
         }
 
@@ -309,7 +325,15 @@ public sealed class AppContainerSandbox : IDisposable
 
     private void AddGrant(TrackedAclGrant grant)
     {
-        if (_grants.Any(item =>
+        if (grant.Kind == TrackedGrantKind.FileSystem &&
+            Options.FileSystemPolicyBackend ==
+            AppContainerFileSystemPolicyBackend.BrokeredFileSystem)
+        {
+            AddBrokeredFileSystemGrant(grant);
+            return;
+        }
+
+        if (_aclGrants.Any(item =>
                 string.Equals(
                     item.Key,
                     grant.Key,
@@ -322,8 +346,88 @@ public sealed class AppContainerSandbox : IDisposable
         // next managed statement, the next Shackles run still knows which unique
         // SID to revoke.
         _journal.Track(grant);
-        _grants.Add(grant);
+        _aclGrants.Add(grant);
         AclGrantManager.Apply(grant, _identity.SidBytes);
+    }
+
+    private void AddBrokeredFileSystemGrant(TrackedAclGrant grant)
+    {
+        if (_brokeredFileSystemGrants.Any(item =>
+                string.Equals(
+                    item.Key,
+                    grant.Key,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        if (!_brokeredFileSystemPolicyMayExist)
+        {
+            // Persist intent before invoking bfscfg. A successful or timed-out
+            // native operation can then be cleared after a process crash.
+            _journal.MarkBrokeredFileSystemPolicyMayExist();
+            _brokeredFileSystemPolicyMayExist = true;
+        }
+
+        _brokeredFileSystem.AddPolicy(ProfileName, grant);
+        _brokeredFileSystemGrants.Add(grant);
+    }
+
+    private bool ReleaseResourcePolicy(List<string> warnings)
+    {
+        var canDeleteProfile = true;
+        if (_brokeredFileSystemPolicyMayExist)
+        {
+            var warning = _brokeredFileSystem.TryClearPolicy(ProfileName);
+            if (warning is null)
+            {
+                _brokeredFileSystemPolicyMayExist = false;
+                _brokeredFileSystemGrants.Clear();
+                try
+                {
+                    _journal.MarkBrokeredFileSystemPolicyCleared();
+                }
+                catch (Exception exception)
+                {
+                    canDeleteProfile = false;
+                    warnings.Add(
+                        "BFS policy was cleared, but its cleanup state could " +
+                        "not be journaled: " + exception.Message);
+                }
+            }
+            else
+            {
+                canDeleteProfile = false;
+                warnings.Add(warning);
+            }
+        }
+
+        for (var index = _aclGrants.Count - 1; index >= 0; index--)
+        {
+            var grant = _aclGrants[index];
+            var warning = AclGrantManager.TryRevoke(
+                grant,
+                _identity.SidBytes);
+            if (warning is not null)
+            {
+                warnings.Add(warning);
+                continue;
+            }
+
+            _aclGrants.RemoveAt(index);
+            try
+            {
+                _journal.Untrack(grant);
+            }
+            catch (Exception exception)
+            {
+                warnings.Add(
+                    $"Access was revoked from '{grant.Target}', but its cleanup " +
+                    $"journal could not be updated: {exception.Message}");
+            }
+        }
+
+        return canDeleteProfile;
     }
 
     private static bool IsSystemManagedDirectory(string path)
@@ -349,31 +453,51 @@ public sealed class AppContainerSandbox : IDisposable
 
     private void ProcessExited(TrackedAppContainerProcess process)
     {
-        var removed = false;
-        lock (_stateGate)
+        lock (_operationGate)
         {
-            if (!_closing && !_closed)
+            var removed = false;
+            var releaseResourcePolicy = false;
+            lock (_stateGate)
             {
-                removed = _processes.Remove(process);
+                if (!_closing && !_closed)
+                {
+                    removed = _processes.Remove(process);
+                    releaseResourcePolicy = removed && _processes.Count == 0;
+                }
             }
-        }
 
-        if (!removed)
-        {
-            return;
-        }
+            if (!removed)
+            {
+                return;
+            }
 
-        process.Dispose();
-        OnChanged(closed: false);
+            process.Dispose();
+            var warnings = new List<string>();
+            if (releaseResourcePolicy)
+            {
+                _ = ReleaseResourcePolicy(warnings);
+            }
+
+            OnChanged(
+                closed: false,
+                resourcePolicyCleanupAttempted: releaseResourcePolicy,
+                warnings);
+        }
     }
 
-    private void OnChanged(bool closed)
+    private void OnChanged(
+        bool closed,
+        bool resourcePolicyCleanupAttempted = false,
+        IReadOnlyList<string>? cleanupWarnings = null)
     {
         try
         {
             Changed?.Invoke(
                 this,
-                new AppContainerSandboxChangedEventArgs(closed));
+                new AppContainerSandboxChangedEventArgs(
+                    closed,
+                    resourcePolicyCleanupAttempted,
+                    cleanupWarnings ?? Array.Empty<string>()));
         }
         catch
         {

@@ -4,24 +4,44 @@ namespace Shackles.AppContainers;
 
 public sealed class AppContainerManager : IDisposable
 {
+    internal const string BrokeredFileSystemCapabilityName =
+        "AgenticAppContainer";
+
     private readonly object _gate = new();
     private readonly List<AppContainerSandbox> _sandboxes = [];
     private readonly string _journalDirectory;
+    private readonly IBrokeredFileSystemConfigurator _brokeredFileSystem;
     private bool _disposed;
 
     public AppContainerManager()
-        : this(CleanupJournal.DefaultDirectory)
+        : this(
+            CleanupJournal.DefaultDirectory,
+            new BrokeredFileSystemConfigurator())
     {
     }
 
     internal AppContainerManager(string journalDirectory)
+        : this(journalDirectory, new BrokeredFileSystemConfigurator())
+    {
+    }
+
+    internal AppContainerManager(
+        string journalDirectory,
+        IBrokeredFileSystemConfigurator brokeredFileSystem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(journalDirectory);
+        ArgumentNullException.ThrowIfNull(brokeredFileSystem);
         _journalDirectory = Path.GetFullPath(journalDirectory);
-        RecoveryResult = CleanupJournal.RecoverStale(_journalDirectory);
+        _brokeredFileSystem = brokeredFileSystem;
+        BrokeredFileSystemSupport = brokeredFileSystem.Support;
+        RecoveryResult = CleanupJournal.RecoverStale(
+            _journalDirectory,
+            brokeredFileSystem);
     }
 
     public AppContainerRecoveryResult RecoveryResult { get; }
+
+    public BrokeredFileSystemSupport BrokeredFileSystemSupport { get; }
 
     public IReadOnlyList<AppContainerSandbox> Sandboxes
     {
@@ -43,8 +63,17 @@ public sealed class AppContainerManager : IDisposable
         ThrowIfDisposed();
 
         var normalizedOptions = NormalizeOptions(sandboxOptions, out var grants);
-        var capabilitySids =
-            CapabilitySidResolver.Resolve(normalizedOptions.CapabilityNames);
+        if (normalizedOptions.FileSystemPolicyBackend ==
+                AppContainerFileSystemPolicyBackend.BrokeredFileSystem &&
+            !BrokeredFileSystemSupport.IsAvailable)
+        {
+            throw new AppContainerException(
+                AppContainerOperation.ConfigureBrokeredFileSystem,
+                BrokeredFileSystemSupport.Summary);
+        }
+
+        var capabilitySids = CapabilitySidResolver.Resolve(
+            BuildEffectiveCapabilityNames(normalizedOptions));
         var identity =
             AppContainerIdentity.Create(normalizedOptions.DisplayName);
         CleanupJournal? journal = null;
@@ -54,12 +83,14 @@ public sealed class AppContainerManager : IDisposable
             journal = CleanupJournal.Create(
                 _journalDirectory,
                 identity,
-                normalizedOptions.DisplayName);
+                normalizedOptions.DisplayName,
+                normalizedOptions.FileSystemPolicyBackend);
             sandbox = new AppContainerSandbox(
                 identity,
                 capabilitySids,
                 normalizedOptions,
-                journal);
+                journal,
+                _brokeredFileSystem);
             journal = null;
 
             foreach (var grant in grants)
@@ -162,6 +193,12 @@ public sealed class AppContainerManager : IDisposable
         ArgumentNullException.ThrowIfNull(options.CapabilityNames);
         ArgumentNullException.ThrowIfNull(options.FileSystemGrants);
         ArgumentNullException.ThrowIfNull(options.RegistryGrants);
+        if (!Enum.IsDefined(options.FileSystemPolicyBackend))
+        {
+            throw new ArgumentException(
+                "The file-system policy backend is not recognized.",
+                nameof(options));
+        }
 
         var normalizedCapabilities = options.CapabilityNames
             .Select(item => item?.Trim() ?? string.Empty)
@@ -194,6 +231,27 @@ public sealed class AppContainerManager : IDisposable
                     item.RegistryView))
                 .ToArray()
         };
+    }
+
+    internal static IReadOnlyList<string> BuildEffectiveCapabilityNames(
+        AppContainerSandboxOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.CapabilityNames);
+
+        var capabilities = options.CapabilityNames.ToList();
+        if (options.FileSystemPolicyBackend ==
+                AppContainerFileSystemPolicyBackend.BrokeredFileSystem &&
+            !capabilities.Contains(
+                BrokeredFileSystemCapabilityName,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            // bfs.sys checks this capability on the AppContainer token. It is
+            // a runtime requirement, not a grant on the brokered target.
+            capabilities.Add(BrokeredFileSystemCapabilityName);
+        }
+
+        return capabilities;
     }
 
     private void SandboxChanged(

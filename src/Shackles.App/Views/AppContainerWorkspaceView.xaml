@@ -281,6 +281,33 @@
                                         </Border>
                                     </UniformGrid>
 
+                                    <TextBlock Margin="0,15,0,7"
+                                               FontWeight="SemiBold"
+                                               Text="File access mechanism" />
+                                    <UniformGrid Columns="2">
+                                        <Border Margin="0,0,5,0"
+                                                Style="{StaticResource OptionCardStyle}">
+                                            <RadioButton x:Name="FileSystemAclRadio"
+                                                         GroupName="FileSystemPolicyBackend"
+                                                         IsChecked="True"
+                                                         Checked="PreviewOption_Changed"
+                                                         Unchecked="PreviewOption_Changed"
+                                                         Content="Host ACL grants" />
+                                        </Border>
+                                        <Border Margin="5,0,0,0"
+                                                Style="{StaticResource OptionCardStyle}">
+                                            <RadioButton x:Name="BrokeredFileSystemRadio"
+                                                         GroupName="FileSystemPolicyBackend"
+                                                         Checked="PreviewOption_Changed"
+                                                         Unchecked="PreviewOption_Changed"
+                                                         Content="Brokered File System (experimental)" />
+                                        </Border>
+                                    </UniformGrid>
+                                    <TextBlock x:Name="BfsSupportText"
+                                               Margin="0,7,0,0"
+                                               Style="{StaticResource CaptionStyle}"
+                                               TextWrapping="Wrap" />
+
                                     <TextBlock Margin="0,15,0,4"
                                                FontWeight="SemiBold"
                                                Text="Process behavior" />
@@ -352,24 +379,24 @@
                                           IsChecked="True"
                                           Checked="PreviewOption_Changed"
                                           Unchecked="PreviewOption_Changed"
-                                          Content="Temporarily add the sandbox SID to the executable folder when needed" />
+                                          Content="Automatically make the executable folder available when needed" />
 
                                 <Separator Margin="0,19,0,15" />
                                 <TextBlock Style="{StaticResource StepTitleStyle}"
                                            Text="3. Access" />
                                 <TextBlock Margin="0,3,0,11"
                                            Style="{StaticResource CaptionStyle}"
-                                           Text="File-system and registry grants change permissions on host objects. Network and capability selections only affect the sandbox token." />
+                                           Text="File access uses the selected mechanism. Registry grants use temporary host ACL entries. Network and capability selections affect the sandbox token." />
 
                                 <TabControl x:Name="SharedAccessTabs" MinHeight="330">
                                     <TabItem Header="Files &amp; folders">
                                         <StackPanel Margin="12">
-                                            <TextBlock FontWeight="SemiBold"
-                                                       Text="Temporary file-system ACL grants" />
-                                            <TextBlock Margin="0,4,0,10"
+                                            <TextBlock x:Name="FileSystemPolicyHeadingText"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock x:Name="FileSystemPolicyDescriptionText"
+                                                       Margin="0,4,0,10"
                                                        Style="{StaticResource CaptionStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Text="When the sandbox is created, Shackles adds an explicit allow entry for its SID. A folder entry applies to that folder and inherits to child files and folders. Cleanup attempts to remove the entry." />
+                                                       TextWrapping="Wrap" />
                                             <TextBlock Style="{StaticResource FieldLabelStyle}"
                                                        Text="Existing file or folder path" />
                                             <Grid Margin="0,5,0,8">
@@ -406,10 +433,10 @@
                                                         Click="AddFileSystemGrant_Click"
                                                         Content="_Add path" />
                                             </Grid>
-                                            <TextBlock Margin="0,6,0,9"
+                                            <TextBlock x:Name="FileSystemPolicyRequirementText"
+                                                       Margin="0,6,0,9"
                                                        Style="{StaticResource CaptionStyle}"
-                                                       TextWrapping="Wrap"
-                                                       Text="The path must already exist, and Shackles must have permission to change its ACL. Content write access alone is not sufficient." />
+                                                       TextWrapping="Wrap" />
                                             <ListBox x:Name="FileGrantList"
                                                      MinHeight="105"
                                                      BorderThickness="1">
@@ -453,7 +480,7 @@
                                             <TextBlock Margin="0,4,0,10"
                                                        Style="{StaticResource CaptionStyle}"
                                                        TextWrapping="Wrap"
-                                                       Text="When the sandbox is created, Shackles adds an explicit allow entry for its SID to the existing key. Cleanup attempts to remove the entry." />
+                                                       Text="For a launch, Shackles adds an explicit allow entry for its SID to the existing key. The entry is removed when the final directly tracked process exits and reapplied for a later launch." />
                                             <TextBlock Style="{StaticResource FieldLabelStyle}"
                                                        Text="Existing registry key path" />
                                             <TextBox x:Name="RegistryKeyTextBox"
@@ -672,7 +699,7 @@
                                                    Style="{StaticResource SummaryValueStyle}" />
                                         <TextBlock Grid.Row="7"
                                                    Style="{StaticResource SummaryLabelStyle}"
-                                                   Text="Host ACLs" />
+                                                   Text="File access" />
                                         <TextBlock x:Name="HostChangesSummaryText"
                                                    Grid.Row="7"
                                                    Grid.Column="1"

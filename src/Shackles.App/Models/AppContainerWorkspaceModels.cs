@@ -63,7 +63,13 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
                 IsNetworkCapability) ?? Draft.NetworkCapabilityCount;
             var credentialsEnabled = _snapshot?.Options.CapabilityNames.Any(
                 IsNetworkCredentialCapability) ?? Draft.NetworkCredentials;
+            var fileSystemBackend = _snapshot?.Options.FileSystemPolicyBackend ??
+                                    Draft.FileSystemPolicyBackend;
             return $"{(strict ? "Strict (LPAC)" : "Standard")} • " +
+                   (fileSystemBackend ==
+                    AppContainerFileSystemPolicyBackend.BrokeredFileSystem
+                       ? "BFS files • "
+                       : "ACL files • ") +
                    (networkCount == 0
                        ? "no network"
                        : $"{networkCount} network grant{(networkCount == 1 ? string.Empty : "s")}") +
@@ -120,6 +126,8 @@ internal sealed class AppContainerSandboxDraft
 
     internal bool UseLowPrivilege { get; set; }
 
+    internal AppContainerFileSystemPolicyBackend FileSystemPolicyBackend { get; set; }
+
     internal bool AllowChildren { get; set; } = true;
 
     internal bool UseMinimalEnvironment { get; set; }
@@ -167,6 +175,8 @@ internal sealed class AppContainerSandboxDraft
     {
         Name = name;
         UseLowPrivilege = false;
+        FileSystemPolicyBackend =
+            AppContainerFileSystemPolicyBackend.AccessControlLists;
         AllowChildren = true;
         UseMinimalEnvironment = false;
         ExecutablePath = string.Empty;

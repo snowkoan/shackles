@@ -12,7 +12,7 @@ It is intentionally an exploration workbench, not only a polished wrapper around
 | Workspace | Process model | Controls | Lifetime and host effects |
 | --- | --- | --- | --- |
 | **Job Objects** | Attach or launch | Job limits and telemetry | Session-owned kernel object; assignment cannot be undone |
-| **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Profile/SID reused per card; selected grants temporarily change ACLs |
+| **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Reusable profile/SID; file access through temporary ACLs or experimental BFS; registry access through ACLs |
 | **Experimental Sandboxes** | Launch only | Experimental identity, path, network, and UI policy | Dynamically probed; no host ACL changes |
 
 The workspaces are not interchangeable. Job Objects can often accept running processes; identity and sandbox policy must be applied at launch. Experimental status is descriptive rather than exclusionary: it changes the warnings, evidence, and availability checks, not whether a mechanism is considered worth exploring.
@@ -83,10 +83,27 @@ dotnet publish src\Shackles.App\Shackles.App.csproj `
 
 ## App Containers workspace
 
-Each card creates a unique profile and SID on its first successful launch; later launches reuse that identity and policy. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and file or registry grants.
+Each card creates a unique profile and SID on its first successful launch and reuses that identity later. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and explicit file or registry grants.
 
-> [!IMPORTANT]
-> A file or registry grant adds an explicit allow ACE for the sandbox SID. Drafts do not change the host. Before applying a grant, Shackles journals it; closing the card or app terminates launched roots, removes tracked ACEs, and deletes the profile. Cleanup is best effort and retried on the next run if needed.
+File access has two explicit backends:
+
+- **Host ACL grants** add a temporary allow ACE for the sandbox SID.
+- **Brokered File System (BFS)** asks Windows to broker selected paths without changing their ACLs.
+
+Registry grants always use temporary ACL entries. Drafts do not change host state. Shackles journals cleanup intent before applying ACL or BFS policy, releases resource policy when the final directly tracked process exits, and reapplies it for a later launch. Closing the card or app also terminates directly tracked processes and deletes the generated profile. Incomplete cleanup is reported and retried on the next run.
+
+### Brokered File System (experimental)
+
+BFS is intended to give an agent-style AppContainer access to selected existing host paths without rewriting each target's DACL. In BFS mode, Shackles adds the `AgenticAppContainer` capability checked by `bfs.sys` to the launched process token, then uses `bfscfg.exe` to associate path rules with the generated AppContainer profile. The capability makes the token eligible for brokering; the per-profile path rules grant the actual access. Neither step adds an ACE to the target.
+
+Shackles discovers BFS at runtime, resolves the OS-shipped `%SystemRoot%\System32\bfscfg.exe` by absolute path, reports whether `bfs.sys` is present, and never falls back silently to ACL mutation. Read/run rules are brokered read-only, read/write/delete rules are brokered read/write, directory rules include descendants, and policy is cleared by AppContainer profile name.
+
+> [!WARNING]
+> BFS and `bfscfg.exe` are observable Windows components, but their policy contract is experimental and partially documented. Tool presence means only that Shackles can attempt the operation. [Microsoft MXC currently compiles its BFS tier out](https://github.com/microsoft/mxc/blob/main/docs/process-container/os-version-support.md) because `bfscfg.exe` can deadlock Windows 11 25H2. Shackles requires explicit confirmation, waits at most ten seconds for each tool invocation, journals uncertain policy, and retains the profile when clearing fails. A kernel-side stall can outlive that timeout; use a disposable test machine.
+
+The command mapping and lifecycle follow [MXC's `FileSystemBfsManager`](https://github.com/microsoft/mxc/blob/main/src/backends/appcontainer/common/src/filesystem_bfs.rs); the required token capability follows [MXC's AppContainer launcher](https://github.com/microsoft/mxc/blob/main/src/backends/appcontainer/common/src/appcontainer_runner.rs). Automated tests use an injected configurator and do not execute `bfscfg.exe`.
+
+This direct AppContainer + `bfscfg.exe` mode is separate from the **Experimental Sandboxes** workspace. That workspace submits native path rules through the probed SBOX/processmodel contract and leaves their implementation and lifetime to Windows; Shackles does not run `bfscfg.exe` for those launches.
 
 Network connectivity and `enterpriseAuthentication` are separate; SMB access still depends on normal share, filesystem, firewall, and domain policy. Children remain in the boundary, but Shackles tracks only directly launched roots.
 
@@ -103,9 +120,7 @@ That experimental status is the reason the workspace probes and explains the mec
 
 ### Enablement research
 
-On Windows 11 25H2 build `26200.9106`, `processmodel.dll` exported both APIs but the support mask was `0`; MXC 0.8 selected its `appcontainer-dacl` fallback. Public symbols showed this feature chain:
-
-Public symbols for that DLL showed this effective feature chain:
+On Windows 11 25H2 build `26200.9106`, `processmodel.dll` exported both APIs but the support mask was `0`; MXC 0.8 selected its `appcontainer-dacl` fallback. Public symbols showed this effective feature chain:
 
 | Feature ID | Symbolic name | Observed state |
 | --- | --- | --- |
@@ -197,7 +212,7 @@ Completion messages are a live convenience view, not an event ledger. Windows gu
 
 ## Existing tools
 
-If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/process-governor) already provides a good command-line experience for common CPU, memory, affinity, time, and priority limits. [System Informer](https://github.com/winsiderss/systeminformer) and [Process Explorer](https://learn.microsoft.com/en-us/sysinternals/downloads/process-explorer) are strong inspectors. [Microsoft Execution Containers (MXC)](https://github.com/microsoft/mxc) provides a policy-driven execution layer with Windows fallback tiers and is a useful compatibility reference for the experimental workspace. Shackles focuses on an interactive, mechanism-specific view of requested and effective state rather than replacing those tools.
+If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/process-governor) provides a command-line experience for common CPU, memory, affinity, time, and priority limits. [System Informer](https://github.com/winsiderss/systeminformer) and [Process Explorer](https://learn.microsoft.com/en-us/sysinternals/downloads/process-explorer) are strong inspectors. [Microsoft Execution Containers (MXC)](https://github.com/microsoft/mxc) provides policy-driven execution with Windows fallback tiers and is a useful AppContainer, BFS, and sandbox compatibility reference. Shackles instead focuses on an interactive, mechanism-specific view of requested and effective state.
 
 ## Windows API references
 
@@ -218,4 +233,4 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 ## Security notes
 
-Shackles requests the minimum job, process, token, and ACL rights needed for each operation, uses owning safe handles for native resources, validates all numeric and textual input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL intent is journaled before mutation and cleanup removes entries only when their SID and expected access match the tracked grant. Experimental feature state is queried, never written. Shackles contains no credentials, cryptographic material, or certificate data.
+Shackles requests the minimum job, process, token, and ACL rights needed for each operation, owns native resources with safe handles, validates input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL mutations and BFS cleanup intent are journaled before application; ACL cleanup removes only entries whose SID and access match the tracked grant. Experimental feature state is queried, never written. Shackles contains no credentials, cryptographic material, or certificate data.

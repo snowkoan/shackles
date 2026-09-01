@@ -9,6 +9,8 @@ public enum AppContainerOperation
     DeriveCapability,
     ApplyFileGrant,
     ApplyRegistryGrant,
+    ConfigureBrokeredFileSystem,
+    ClearBrokeredFileSystem,
     RevokeGrant,
     CreateProcess,
     TrackProcess,
