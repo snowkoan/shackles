@@ -5,6 +5,8 @@
 
 Shackles is a Windows desktop app for applying and inspecting Windows process restrictions. Each Windows mechanism has its own workspace, with its scope, lifetime, and host effects shown explicitly.
 
+It is intentionally an exploration workbench, not only a polished wrapper around stable public APIs. If Windows provides an observable restriction mechanism, Shackles may expose it even when the contract is experimental, build-dependent, partially documented, or still evolving. Such mechanisms belong in the normal build when practical; Shackles discovers availability at runtime, labels support and risk explicitly, and reports what the operating system actually accepts or rejects.
+
 ## Workspaces
 
 | Workspace | Process model | Controls | Lifetime and host effects |
@@ -13,7 +15,7 @@ Shackles is a Windows desktop app for applying and inspecting Windows process re
 | **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Profile/SID reused per card; selected grants temporarily change ACLs |
 | **Experimental Sandboxes** | Launch only | Experimental identity, path, network, and UI policy | Dynamically probed; no host ACL changes |
 
-The workspaces are not interchangeable. Job Objects can often accept running processes; identity and sandbox policy must be applied at launch.
+The workspaces are not interchangeable. Job Objects can often accept running processes; identity and sandbox policy must be applied at launch. Experimental status is descriptive rather than exclusionary: it changes the warnings, evidence, and availability checks, not whether a mechanism is considered worth exploring.
 
 > [!IMPORTANT]
 > Windows does not provide a Job Object detach operation. Once a process is assigned successfully, it remains in that job for the rest of the process lifetime. Shackles validates each PID immediately before assignment and reports success or failure separately for every process.
@@ -96,6 +98,8 @@ The current policy covers optional AppContainer/LPAC identity, integrity, Win32k
 
 > [!WARNING]
 > This API is experimental and build-dependent. The support query is authoritative; Shackles never writes feature overrides or fabricates support.
+
+That experimental status is the reason the workspace probes and explains the mechanism, not a reason to compile it out. The same principle applies to other OS-shipped restriction facilities that Shackles may add: include the exploration surface when practical, detect it at runtime, and keep unsupported actions unavailable without disguising why.
 
 ### Enablement research
 
