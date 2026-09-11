@@ -8,7 +8,9 @@ Shackles is also an exploration workbench for restrictions that Windows actually
 
 ## Experience
 
-Each Windows mechanism gets a focused workspace. Jobs support attach and launch; identity and sandbox policy are launch-only. Every view states scope, lifetime, permissions, host changes, and the verified result.
+Each Windows mechanism gets a focused workspace. Jobs and WESP Blocking support
+attach and launch; identity and sandbox policy are launch-only. Every view states
+scope, lifetime, permissions, host changes, and the verified result.
 
 The interface stays calm and readable. Detailed evidence appears when useful, and predictably unavailable actions are disabled. Availability and support status are reported as observed properties, not used as a reason to hide an otherwise explorable mechanism at build time.
 
@@ -17,6 +19,12 @@ The interface stays calm and readable. Detailed evidence appears when useful, an
 - **Job Objects:** attach compatible processes or launch new ones, apply documented limits, and inspect telemetry. Assignment is irreversible and ownership is session-scoped.
 - **App Containers:** launch with a reusable per-card SID, AppContainer/LPAC policy, capabilities, and explicit resource grants. File rules can use temporary SID ACLs or experimental BFS. BFS gives agent-style processes path-specific access without changing target ACLs by combining the required `AgenticAppContainer` token capability with per-profile broker policy. Registry access remains ACL-based. Temporary policy is released when the sandbox becomes idle; the profile remains reusable.
 - **Experimental Sandboxes:** call the dynamically probed Windows API directly for identity, path, network, and UI policy without ACL changes. Shackles neither falls back nor enables internal feature IDs.
+- **WESP Blocking:** launch or select a process with its normal user access under
+  client-session WESP rules that subtract configured file, registry, UNC, and
+  child-application operations. A propagated process context key scopes the rules
+  to tagged processes and future children. It is default-allow, makes no
+  persistent permission changes, and is presented as a preview proof of concept
+  rather than a sandbox.
 
 The mechanisms remain separate. Unsupported features stay unavailable rather than being emulated.
 
@@ -28,7 +36,11 @@ The mechanisms remain separate. Unsupported features stay unavailable rather tha
 4. Explore a separate Windows Filtering Platform workspace for executable- or user-scoped network blocking.
 5. Follow the supported successor to the experimental APIs while keeping AppContainer independent.
 
-Launch-time controls cannot undo activity that already happened.
+Controls cannot undo activity that already happened. For a new launch, WESP
+Blocking installs its rules before creating the suspended root process and resumes
+it only after the process context is attached. For an existing process, it verifies
+the selected process identity immediately before tagging it, then applies only to
+later covered operations and children started afterward.
 
 ## Principles
 

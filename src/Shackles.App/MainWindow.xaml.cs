@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 using Shackles.App.Dialogs;
 using Shackles.App.Models;
 using Shackles.App.Services;
@@ -12,10 +10,7 @@ namespace Shackles.App;
 
 public sealed partial class MainWindow : Window, IDisposable
 {
-    private const string ProcessDragFormat = "Shackles.ProcessRows.v1";
-
     private readonly MainViewModel _viewModel;
-    private Point _dragStartPoint;
     private bool _isOpeningNamedJob;
     private bool _closeConfirmed;
     private bool _disposed;
@@ -32,7 +27,8 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null)
+            ExperimentalSandboxWorkspace is null ||
+            WespWorkspace is null)
         {
             return;
         }
@@ -40,13 +36,15 @@ public sealed partial class MainWindow : Window, IDisposable
         JobObjectsWorkspace.Visibility = Visibility.Visible;
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
+        WespWorkspace.Visibility = Visibility.Collapsed;
     }
 
     private void AppContainerWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null)
+            ExperimentalSandboxWorkspace is null ||
+            WespWorkspace is null)
         {
             return;
         }
@@ -54,6 +52,7 @@ public sealed partial class MainWindow : Window, IDisposable
         JobObjectsWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.Visibility = Visibility.Visible;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
+        WespWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.PrepareForDisplay();
     }
 
@@ -63,7 +62,8 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null)
+            ExperimentalSandboxWorkspace is null ||
+            WespWorkspace is null)
         {
             return;
         }
@@ -71,7 +71,25 @@ public sealed partial class MainWindow : Window, IDisposable
         JobObjectsWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Visible;
+        WespWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.PrepareForDisplay();
+    }
+
+    private void WespWorkspaceTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobObjectsWorkspace is null ||
+            AppContainerWorkspace is null ||
+            ExperimentalSandboxWorkspace is null ||
+            WespWorkspace is null)
+        {
+            return;
+        }
+
+        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
+        AppContainerWorkspace.Visibility = Visibility.Collapsed;
+        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
+        WespWorkspace.Visibility = Visibility.Visible;
+        WespWorkspace.PrepareForDisplay();
     }
 
     private async void NewJob_Click(object sender, RoutedEventArgs e)
@@ -117,6 +135,12 @@ public sealed partial class MainWindow : Window, IDisposable
     private async void LaunchProcess_Click(object sender, RoutedEventArgs e) => await LaunchInSelectedJobAsync().ConfigureAwait(true);
 
     private async void JobDetails_LaunchRequested(object sender, RoutedEventArgs e) => await LaunchInSelectedJobAsync().ConfigureAwait(true);
+
+    private async void AssignRunningProcesses_Click(object sender, RoutedEventArgs e) =>
+        await AssignRunningProcessesAsync().ConfigureAwait(true);
+
+    private async void JobDetails_AssignProcessesRequested(object sender, RoutedEventArgs e) =>
+        await AssignRunningProcessesAsync().ConfigureAwait(true);
 
     private async Task LaunchInSelectedJobAsync()
     {
@@ -188,81 +212,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _viewModel.CloseJob(job);
     }
 
-    private void ProcessList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        _dragStartPoint = e.GetPosition(ProcessList);
-    }
-
-    private void ProcessList_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            return;
-        }
-
-        var current = e.GetPosition(ProcessList);
-        if (Math.Abs(current.X - _dragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(current.Y - _dragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
-        {
-            return;
-        }
-
-        var selectedRows = ProcessList.SelectedItems.OfType<ProcessEntry>().ToArray();
-        if (selectedRows.Length == 0)
-        {
-            return;
-        }
-
-        var data = new DataObject();
-        data.SetData(ProcessDragFormat, new ProcessDragPayload(selectedRows));
-        _ = DragDrop.DoDragDrop(ProcessList, data, DragDropEffects.Move);
-    }
-
-    private void JobCard_DragEnter(object sender, DragEventArgs e)
-    {
-        if (sender is not Border card || !TryGetPayload(e.Data, out _))
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
-            return;
-        }
-
-        e.Effects = DragDropEffects.Move;
-        card.BorderBrush = SystemColors.HighlightBrush;
-        card.BorderThickness = new Thickness(2);
-        e.Handled = true;
-    }
-
-    private void JobCard_DragLeave(object sender, DragEventArgs e)
-    {
-        if (sender is Border card)
-        {
-            ResetDropCard(card);
-        }
-    }
-
-    private async void JobCard_Drop(object sender, DragEventArgs e)
-    {
-        if (sender is not Border card)
-        {
-            return;
-        }
-
-        ResetDropCard(card);
-        if (card.DataContext is not JobViewModel target || !TryGetPayload(e.Data, out var payload))
-        {
-            e.Effects = DragDropEffects.None;
-            e.Handled = true;
-            return;
-        }
-
-        JobList.SelectedItem = target;
-        e.Effects = DragDropEffects.Move;
-        e.Handled = true;
-        await ConfirmAndAssignAsync(target, payload.Rows).ConfigureAwait(true);
-    }
-
-    private async void AssignSelected_Click(object sender, RoutedEventArgs e)
+    private async Task AssignRunningProcessesAsync()
     {
         if (_viewModel.SelectedJob is not { } target)
         {
@@ -276,20 +226,74 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var selectedRows = ProcessList.SelectedItems.OfType<ProcessEntry>().ToArray();
-        if (selectedRows.Length == 0)
+        if (target.IsBusy)
         {
             MessageBox.Show(
                 this,
-                "Select one or more process rows first.",
-                "No process selected",
+                $"Wait for the current operation on '{target.DisplayName}' to finish before assigning processes.",
+                "Job operation in progress",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
-            ProcessList.Focus();
             return;
         }
 
-        await ConfirmAndAssignAsync(target, selectedRows).ConfigureAwait(true);
+        try
+        {
+            var targetRefresh = target.RefreshAsync();
+            var processRefresh = _viewModel.RefreshProcessesAsync();
+            await Task.WhenAll(targetRefresh, processRefresh).ConfigureAwait(true);
+            if (!processRefresh.Result)
+            {
+                MessageBox.Show(
+                    this,
+                    _viewModel.StatusMessage,
+                    "Could not open the process picker",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(
+                this,
+                $"Shackles could not refresh the Job Object and running processes: {exception.Message}",
+                "Could not open the process picker",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
+
+        var memberProcessIds = target.Members
+            .Select(member => member.ProcessId)
+            .ToHashSet();
+        var memberIdentities = _viewModel.Processes
+            .Where(process =>
+                memberProcessIds.Contains(process.ProcessId) &&
+                process.CreationTimeUtcFileTime.HasValue)
+            .Select(process => new ProcessIdentity(
+                process.ProcessId,
+                process.CreationTimeUtcFileTime!.Value))
+            .ToArray();
+        var dialog = new RunningProcessPickerDialog(
+            _viewModel,
+            new RunningProcessPickerOptions(
+                WindowTitle: $"Assign running processes to {target.DisplayName}",
+                Description:
+                    $"Selected processes will be assigned to '{target.DisplayName}'. This cannot be undone " +
+                    "while a process is running; normally it must be terminated to leave the Job Object. " +
+                    "New children normally inherit membership unless breakaway applies. The current Shackles " +
+                    "process, processes without a verified identity, and current members are omitted.",
+                SelectButtonText: "_Assign selected",
+                SelectButtonAutomationName: "Assign selected processes to the Job Object",
+                ExcludedIdentities: memberIdentities))
+        {
+            Owner = this
+        };
+        if (dialog.ShowDialog() == true && dialog.SelectedProcesses.Count != 0)
+        {
+            await ConfirmAndAssignAsync(target, dialog.SelectedProcesses).ConfigureAwait(true);
+        }
     }
 
     private async Task ConfirmAndAssignAsync(JobViewModel target, IReadOnlyList<ProcessEntry> rows)
@@ -338,7 +342,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             if (resultsByPid.TryGetValue(row.ProcessId, out var attempted))
             {
-                return attempted;
+                return attempted with { ProcessName = row.Name };
             }
 
             return new AssignmentOutcome(row.ProcessId, row.Name, false, row.AssignmentHint, WasAttempted: false);
@@ -353,23 +357,27 @@ public sealed partial class MainWindow : Window, IDisposable
             e.Key == Key.Enter &&
             Keyboard.Modifiers == ModifierKeys.Control)
         {
-            AssignSelected_Click(this, new RoutedEventArgs());
+            AssignRunningProcesses_Click(this, new RoutedEventArgs());
             e.Handled = true;
         }
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (AppContainerWorkspace.IsBusy || ExperimentalSandboxWorkspace.IsBusy)
+        if (AppContainerWorkspace.IsBusy ||
+            ExperimentalSandboxWorkspace.IsBusy ||
+            WespWorkspace.IsBusy)
         {
             e.Cancel = true;
             var workspace = AppContainerWorkspace.IsBusy
                 ? "AppContainer"
-                : "experimental sandbox";
+                : ExperimentalSandboxWorkspace.IsBusy
+                    ? "experimental sandbox"
+                    : "WESP Blocking";
             MessageBox.Show(
                 this,
                 $"Wait for the current {workspace} operation to finish before closing Shackles.",
-                "Sandbox operation in progress",
+                "Restriction operation in progress",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
@@ -397,10 +405,13 @@ public sealed partial class MainWindow : Window, IDisposable
                 AppContainerWorkspace.CanHaveUntrackedDescendants;
             var experimentalTrackedCount =
                 ExperimentalSandboxWorkspace.TrackedLaunchCount;
+            var wespTrackedCount = WespWorkspace.TrackedLaunchCount;
+            var wespHasActiveSession = WespWorkspace.HasActiveSession;
             if (killOnCloseJobs.Length > 0 ||
                 liveNotificationJobs.Length > 0 ||
                 appContainerTrackedCount > 0 ||
-                experimentalTrackedCount > 0)
+                experimentalTrackedCount > 0 ||
+                wespHasActiveSession)
             {
                 var warnings = new List<string>();
                 if (killOnCloseJobs.Length > 0)
@@ -435,6 +446,18 @@ public sealed partial class MainWindow : Window, IDisposable
                         "so descendant lifetime cannot be inspected by Shackles.");
                 }
 
+                if (wespHasActiveSession)
+                {
+                    var rootEffect = wespTrackedCount == 0
+                        ? "There are no running directly tracked roots, but tagged descendants may still exist."
+                        : $"Shackles will request termination of {wespTrackedCount} directly launched root " +
+                          $"process{(wespTrackedCount == 1 ? string.Empty : "es")}.";
+                    warnings.Add(
+                        $"An active WESP Blocking session will be closed. {rootEffect} Closing removes " +
+                        "the client-session blocking rules. Processes selected from the running-process list " +
+                        "will not be terminated; surviving processes and descendants may continue unrestricted.");
+                }
+
                 var answer = MessageBox.Show(
                     this,
                     $"{string.Join("\n\n", warnings)}\n\nClose Shackles anyway?",
@@ -455,24 +478,6 @@ public sealed partial class MainWindow : Window, IDisposable
         Dispose();
     }
 
-    private static bool TryGetPayload(IDataObject data, out ProcessDragPayload payload)
-    {
-        if (data.GetDataPresent(ProcessDragFormat) && data.GetData(ProcessDragFormat) is ProcessDragPayload value)
-        {
-            payload = value;
-            return true;
-        }
-
-        payload = default!;
-        return false;
-    }
-
-    private static void ResetDropCard(Border card)
-    {
-        card.ClearValue(Border.BorderBrushProperty);
-        card.ClearValue(Border.BorderThicknessProperty);
-    }
-
     public void Dispose()
     {
         if (_disposed)
@@ -483,8 +488,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _disposed = true;
         AppContainerWorkspace.Dispose();
         ExperimentalSandboxWorkspace.Dispose();
+        WespWorkspace.Dispose();
         _viewModel.Dispose();
     }
-
-    private sealed record ProcessDragPayload(IReadOnlyList<ProcessEntry> Rows);
 }

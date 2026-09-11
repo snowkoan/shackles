@@ -14,8 +14,17 @@ It is intentionally an exploration workbench, not only a polished wrapper around
 | **Job Objects** | Attach or launch | Job limits and telemetry | Session-owned kernel object; assignment cannot be undone |
 | **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Reusable profile/SID; file access through temporary ACLs or experimental BFS; registry access through ACLs |
 | **Experimental Sandboxes** | Launch only | Experimental identity, path, network, and UI policy | Dynamically probed; no host ACL changes |
+| **WESP Blocking (preview)** | Attach or launch | Block or make read-only selected folders and registry keys; optionally block UNC paths; block selected child executable names | Client-session rules scoped by process context; no persistent permission changes |
 
-The workspaces are not interchangeable. Job Objects can often accept running processes; identity and sandbox policy must be applied at launch. Experimental status is descriptive rather than exclusionary: it changes the warnings, evidence, and availability checks, not whether a mechanism is considered worth exploring.
+The workspaces are not interchangeable. Job Objects and WESP Blocking can accept
+running processes, while identity and sandbox policy must be applied at launch.
+Job Objects and WESP Blocking use the same searchable, refreshable running-process
+picker; each workspace then presents its own confirmation and result semantics.
+Applying WESP Blocking to a running process affects its later operations and
+children it starts afterward; it cannot undo earlier operations or tag descendants
+that are already running. Experimental status is descriptive rather than
+exclusionary: it changes the warnings, evidence, and availability checks, not
+whether a mechanism is considered worth exploring.
 
 > [!IMPORTANT]
 > Windows does not provide a Job Object detach operation. Once a process is assigned successfully, it remains in that job for the rest of the process lifetime. Shackles validates each PID immediately before assignment and reports success or failure separately for every process.
@@ -48,8 +57,8 @@ Prerequisites:
 - [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
 
 ```powershell
-dotnet restore Shackles.slnx
-dotnet build Shackles.slnx -c Release
+.\build.ps1
+.\build.ps1 -Configuration Release
 dotnet run --project src\Shackles.App\Shackles.App.csproj
 ```
 
@@ -80,6 +89,115 @@ dotnet publish src\Shackles.App\Shackles.App.csproj `
   -p:PublishSingleFile=true `
   -o artifacts\Shackles-win-x64
 ```
+
+## WESP Blocking preview workspace
+
+The **Windows Endpoint Security Platform (WESP)** is a preview Windows
+enforcement framework. Shackles uses it as a deliberately small, default-allow
+blocking proof of concept: a launched or selected running program keeps the
+current user's normal access, and configured WESP rules subtract selected file,
+registry, and child-process operations. This is **WESP Blocking**, not a general
+sandbox.
+
+See the [WESP Blocking design and usage guide](docs/WESP-BLOCKING.md) for the
+complete rule semantics, lifecycle, compatibility strategy, troubleshooting,
+and known boundaries.
+
+### Requirements
+
+- An x64 Windows test image supported by the supplied WESP preview package.
+- The `wesp` driver installed and running, with Windows test-signing enabled for
+  the current boot when required by that package.
+- Shackles started with **Run as administrator**. Connecting to WESP requires a
+  high-integrity process token.
+- No other Shackles instance with an active WESP Blocking session.
+
+Shackles bundles `espclient.dll` beside the application. The support status checks
+that the DLL loads and exposes the baseline client APIs. Driver connectivity and
+the capabilities needed by the configured policy are exercised on first launch;
+if registration or connection fails, Shackles also reports the observed `wesp`
+service state.
+
+### Basic usage
+
+1. Run Shackles as administrator and open the **WESP Blocking** tab. Wait for
+   **WESP client is available**, or use **Refresh support**.
+2. On **Files**, add existing folders as **Blocked** or **Read-only**. Optionally
+   select **Block access to UNC paths** to cover network paths such as
+   `\\server\share`.
+3. On **Registry**, add a key as **Blocked** or **Read-only**. The key need not
+   exist yet; HKCU, HKLM, HKCR, HKU, and canonical `\REGISTRY\MACHINE` or
+   `\REGISTRY\USER` paths are accepted.
+4. On **Child applications**, choose executables that the tagged process tree
+   must not start. Matching uses the executable name only, regardless of folder.
+5. To launch a new root, choose its executable, optional arguments, and optional
+   working directory, then select **Start WESP Blocking and launch**. The root is
+   created suspended and runs only after WESP has tagged it.
+6. To use a process that is already running, select **Start WESP Blocking with
+   running processes…**, then search or refresh the shared running-process picker
+   also used by Job Objects and select one or more processes. The root executable
+   is optional for this path. While a session is active, use **Apply to running
+   processes…** to add more.
+7. Inspect **Processes using this session** and **Session activity**. The activity
+   feed includes the process and observed target for blocked operations and
+   records selected processes plus newly created root and child processes. Use
+   **Save logs…** to export the retained feed as a UTF-8 tab-separated file.
+   Select **Close blocking session** when finished. Selected existing processes
+   remain running; Shackles requests termination only of roots it launched.
+
+| Rule | Effect in the tagged process tree |
+| --- | --- |
+| Blocked folder | Denies the configured blockable reads, opens, mappings, changes, enumeration, and named-stream access on the folder and descendants. |
+| Read-only folder | Allows ordinary reads; denies creation, replacement, truncation, write-capable opens, later writes, writable mappings, deletes, renames, and other configured changes. |
+| Block UNC paths | Applies blocked-folder behavior to MUP-backed UNC paths and descendants. |
+| Blocked registry key | Denies the configured reads and mutations on the key and descendants. |
+| Read-only registry key | Allows supported queries/enumeration while denying create/open-for-write and configured mutations. |
+| Blocked child application | Denies child creation when the image's final executable name matches, regardless of path. |
+
+### Design and lifecycle summary
+
+Before installing a policy, Shackles removes its prior stable client registration,
+connects a fresh client, and explicitly clears all rules for that client. If WESP
+cannot confirm a clean starting state—including when another Shackles client is
+still connected—startup stops before new rules are installed.
+
+Shackles can then create a root suspended and resume it only after attaching a
+per-session value under its private process context key. For a selected running
+process, it verifies the PID and creation time against the process object returned
+by WESP before attaching the same value. `PROCESS_CREATE` rules propagate that
+value to children started afterward; if WESP cannot establish the tag on a new
+child, that child launch is blocked. Already-running descendants are not tagged.
+The design uses no broker, Job Object, or target ACL changes.
+
+Block enforcement is synchronous. **Session activity** records root launches and
+selected running processes directly, and receives blocked operations and
+successful child creation through asynchronous, best-effort WESP notifications.
+With a validated notification layout, each blocked entry identifies both the
+observed target and the configured rule that matched. The retained feed can be
+saved after the session closes as a UTF-8 tab-separated log with session and
+policy context.
+
+Closing first requests termination of roots launched by Shackles, then removes
+the rules and disconnects the client. Processes selected while already running
+are never terminated by session close. Selected processes and descendants may
+therefore continue unrestricted after rule removal. If a launched root remains,
+or live callback state cannot safely be released, Shackles retains the session
+for retry and shows **CLEANUP NEEDED**. Other close errors are still reported
+even if the session has closed.
+
+WESP layouts may change. Shackles displays the connected client version but does
+not reject it solely by version. It checks required exports, event capabilities,
+and built-in properties, while context-key support is validated by the actual
+filter, rule, and tagging operations. The current managed ABI layout profile was
+tested with the supplied WESP 0.13 client. For an unvalidated DLL version,
+enforcement can continue but extended process details in asynchronous activity
+rows are left unknown until that notification layout is validated.
+
+> [!WARNING]
+> Treat this as WESP enforcement research, not an adversarial security boundary.
+> Existing untagged or single-instance processes, inherited handles, brokered
+> work, path aliases, pre-existing mappings, and WESP events absent from the
+> tested preview remain outside the current claim.
 
 ## App Containers workspace
 
@@ -216,6 +334,8 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 ## Windows API references
 
+- **Windows Endpoint Security Platform API Specification, Rev 3.2**, supplied
+  with the WESP preview SDK
 - [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation)
 - [`CreateAppContainerProfile`](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createappcontainerprofile)
 - [`PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`](https://learn.microsoft.com/en-us/windows/win32/procthread/attribute-list)
@@ -233,4 +353,4 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 ## Security notes
 
-Shackles requests the minimum job, process, token, and ACL rights needed for each operation, owns native resources with safe handles, validates input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL mutations and BFS cleanup intent are journaled before application; ACL cleanup removes only entries whose SID and access match the tracked grant. Experimental feature state is queried, never written. Shackles contains no credentials, cryptographic material, or certificate data.
+Shackles requests the minimum job, process, token, and ACL rights needed for each operation, owns native resources with safe handles, validates input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL mutations and BFS cleanup intent are journaled before application; ACL cleanup removes only entries whose SID and access match the tracked grant. Experimental feature state is queried, never written. WESP client connection requires high integrity, but WESP Blocking does not grant access or rewrite target file or registry permissions; its rules and process context are client-session scoped. Shackles contains no credentials, cryptographic material, or certificate data.

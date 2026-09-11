@@ -1,8 +1,5 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
-using System.Windows.Data;
 using Shackles.App.Infrastructure;
 using Shackles.App.Models;
 using Shackles.App.Services;
@@ -13,9 +10,7 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly IJobControlService _service;
     private int _privateJobNumber;
-    private string _processSearch = string.Empty;
     private JobViewModel? _selectedJob;
-    private bool _isRefreshingProcesses;
     private string _statusMessage = "Ready";
     private bool _statusIsError;
     private bool _isDisposed;
@@ -24,30 +19,11 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     {
         _service = service;
         Capabilities = service.Capabilities;
-        ProcessView = CollectionViewSource.GetDefaultView(Processes);
-        ProcessView.Filter = FilterProcess;
-        ProcessView.SortDescriptions.Add(new SortDescription(nameof(ProcessEntry.Name), ListSortDirection.Ascending));
-        ProcessView.SortDescriptions.Add(new SortDescription(nameof(ProcessEntry.ProcessId), ListSortDirection.Ascending));
-        RefreshProcessesCommand = new AsyncRelayCommand(RefreshProcessesAsync, () => !IsRefreshingProcesses);
     }
 
     public ObservableCollection<ProcessEntry> Processes { get; } = [];
     public ObservableCollection<JobViewModel> Jobs { get; } = [];
-    public ICollectionView ProcessView { get; }
     public JobCapabilitySet Capabilities { get; }
-    public AsyncRelayCommand RefreshProcessesCommand { get; }
-
-    public string ProcessSearch
-    {
-        get => _processSearch;
-        set
-        {
-            if (SetProperty(ref _processSearch, value))
-            {
-                ProcessView.Refresh();
-            }
-        }
-    }
 
     public JobViewModel? SelectedJob
     {
@@ -62,18 +38,6 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool HasSelectedJob => SelectedJob is not null;
-
-    public bool IsRefreshingProcesses
-    {
-        get => _isRefreshingProcesses;
-        private set
-        {
-            if (SetProperty(ref _isRefreshingProcesses, value))
-            {
-                RefreshProcessesCommand.RaiseCanExecuteChanged();
-            }
-        }
-    }
 
     public string StatusMessage
     {
@@ -210,10 +174,9 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         SetStatus($"Closed the app's handle to {job.DisplayName}.", false);
     }
 
-    public async Task RefreshProcessesAsync()
+    public async Task<bool> RefreshProcessesAsync()
     {
         ThrowIfDisposed();
-        IsRefreshingProcesses = true;
         try
         {
             var entries = await Task.Run(ReadProcesses).ConfigureAwait(true);
@@ -224,28 +187,13 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             SetStatus($"Found {entries.Count} running processes.", false);
+            return true;
         }
         catch (Exception ex)
         {
             SetStatus($"Could not refresh processes: {ToUserMessage(ex)}", true);
+            return false;
         }
-        finally
-        {
-            IsRefreshingProcesses = false;
-        }
-    }
-
-    private bool FilterProcess(object value)
-    {
-        if (value is not ProcessEntry process || string.IsNullOrWhiteSpace(ProcessSearch))
-        {
-            return true;
-        }
-
-        var query = ProcessSearch.Trim();
-        return process.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-               process.ProcessId.ToString(CultureInfo.CurrentCulture).Contains(query, StringComparison.OrdinalIgnoreCase) ||
-               (process.ImagePath?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false);
     }
 
     private IReadOnlyList<ProcessEntry> ReadProcesses()

@@ -37,6 +37,9 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Margin="0,0,8,0" Command="{Binding RefreshCommand}" Content="_Refresh job" />
+                    <Button Margin="0,0,8,0"
+                            Click="AssignProcessesButton_Click"
+                            Content="_Assign running processes…" />
                     <Button Margin="0,0,8,0" Click="LaunchButton_Click" Content="_Launch…" />
                     <Button Click="CloseButton_Click" Content="_Close handle" />
                 </StackPanel>

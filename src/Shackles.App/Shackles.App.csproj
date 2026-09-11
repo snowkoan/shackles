@@ -14,5 +14,13 @@
     <ProjectReference Include="..\Shackles.AppContainers\Shackles.AppContainers.csproj" />
     <ProjectReference Include="..\Shackles.ExperimentalSandboxes\Shackles.ExperimentalSandboxes.csproj" />
     <ProjectReference Include="..\Shackles.JobObjects\Shackles.JobObjects.csproj" />
+    <ProjectReference Include="..\Shackles.Wesp\Shackles.Wesp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="espclient.dll"
+          CopyToOutputDirectory="Always"
+          CopyToPublishDirectory="Always"
+          ExcludeFromSingleFile="true" />
   </ItemGroup>
 </Project>

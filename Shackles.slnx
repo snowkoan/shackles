@@ -3,12 +3,14 @@
     <Project Path="src/Shackles.AppContainers/Shackles.AppContainers.csproj" />
     <Project Path="src/Shackles.ExperimentalSandboxes/Shackles.ExperimentalSandboxes.csproj" />
     <Project Path="src/Shackles.JobObjects/Shackles.JobObjects.csproj" />
+    <Project Path="src/Shackles.Wesp/Shackles.Wesp.csproj" />
     <Project Path="src/Shackles.App/Shackles.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Shackles.AppContainers.Tests/Shackles.AppContainers.Tests.csproj" />
     <Project Path="tests/Shackles.ExperimentalSandboxes.Tests/Shackles.ExperimentalSandboxes.Tests.csproj" />
     <Project Path="tests/Shackles.JobObjects.Tests/Shackles.JobObjects.Tests.csproj" />
+    <Project Path="tests/Shackles.Wesp.Tests/Shackles.Wesp.Tests.csproj" />
     <Project Path="tests/Shackles.TestWorker/Shackles.TestWorker.csproj" />
   </Folder>
 </Solution>
