@@ -1047,14 +1047,14 @@ internal static class WespRuleCompiler
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-    private static string GetBlockedChildImageName(string path)
+    private static string GetBlockedChildImageName(string configuredName)
     {
-        var imageName = Path.GetFileName(path);
+        var imageName = Path.GetFileName(configuredName);
         if (string.IsNullOrWhiteSpace(imageName))
         {
             throw new WespException(
                 WespOperation.ValidatePolicy,
-                $"A blocked child application path must include a file name: {path}");
+                $"A blocked child application must include a valid executable file name: {configuredName}");
         }
 
         return imageName;

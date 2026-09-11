@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -18,6 +19,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
 {
     private const int BlockedAccessIndex = 0;
     private const int ReadOnlyAccessIndex = 1;
+    private const int ErrorCancelled = 1223;
 
     private readonly ObservableCollection<WespResourceRuleDraft> _fileRules = [];
     private readonly ObservableCollection<WespResourceRuleDraft> _registryRules = [];
@@ -28,6 +30,8 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
     private WespSupportInfo? _support;
     private WespSession? _session;
     private int _runningSessionProcessCount;
+    private readonly bool _hasRequiredIntegrity;
+    private readonly string? _integrityCheckFailure;
     private bool _isBusy;
     private bool _prepared;
     private bool _disposed;
@@ -35,6 +39,17 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
     public WespWorkspaceView()
     {
         InitializeComponent();
+
+        try
+        {
+            _hasRequiredIntegrity = WespSupport.IsCurrentProcessHighIntegrity();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _hasRequiredIntegrity = false;
+            _integrityCheckFailure = exception.Message;
+        }
+
         FileRuleList.ItemsSource = _fileRules;
         RegistryRuleList.ItemsSource = _registryRules;
         BlockedChildExecutableList.ItemsSource = _blockedChildExecutables;
@@ -45,6 +60,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         };
         _sessionRefreshTimer.Tick += SessionRefreshTimer_Tick;
 
+        ConfigureIntegrityGate();
         UpdateSummary();
         UpdateActionState();
     }
@@ -82,6 +98,12 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             return;
         }
 
+        if (!_hasRequiredIntegrity)
+        {
+            _prepared = true;
+            return;
+        }
+
         if (!_isBusy)
         {
             RefreshSessionDetails(showProcessNotice: false);
@@ -101,7 +123,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
 
     private async Task RefreshSupportAsync()
     {
-        if (_disposed || _isBusy)
+        if (_disposed || _isBusy || !_hasRequiredIntegrity)
         {
             return;
         }
@@ -145,6 +167,102 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             {
                 SetBusy(false);
             }
+        }
+    }
+
+    private void ConfigureIntegrityGate()
+    {
+        InteractiveWorkspace.Visibility = _hasRequiredIntegrity
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ElevationGate.Visibility = _hasRequiredIntegrity
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        if (_hasRequiredIntegrity)
+        {
+            return;
+        }
+
+        RefreshSupportButton.Visibility = Visibility.Collapsed;
+        SupportStateText.Text = _integrityCheckFailure is null
+            ? "Administrator access required"
+            : "Administrator access could not be verified";
+        SupportDetailText.Text = _integrityCheckFailure is null
+            ? "Open a high-integrity Shackles window before configuring WESP Blocking."
+            : "The WESP workspace is locked because Shackles could not verify this process's integrity level.";
+
+        if (_integrityCheckFailure is not null)
+        {
+            ElevationLaunchStatusText.Text =
+                $"Integrity check failed: {_integrityCheckFailure}";
+            ElevationLaunchStatusText.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void OpenElevatedWesp_Click(object sender, RoutedEventArgs e)
+    {
+        if (_hasRequiredIntegrity)
+        {
+            return;
+        }
+
+        try
+        {
+            var executablePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executablePath))
+            {
+                throw new InvalidOperationException(
+                    "Windows could not determine the Shackles application path.");
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                WorkingDirectory = Environment.CurrentDirectory,
+                UseShellExecute = true,
+                Verb = "runas"
+            };
+
+            if (string.Equals(
+                    Path.GetFileNameWithoutExtension(executablePath),
+                    "dotnet",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var applicationAssemblyPath = typeof(App).Assembly.Location;
+                if (string.IsNullOrWhiteSpace(applicationAssemblyPath))
+                {
+                    throw new InvalidOperationException(
+                        "Windows could not determine the Shackles application assembly path.");
+                }
+
+                startInfo.ArgumentList.Add(applicationAssemblyPath);
+            }
+
+            startInfo.ArgumentList.Add(App.WespWorkspaceArgument);
+            using var elevatedProcess = Process.Start(startInfo);
+            if (elevatedProcess is null)
+            {
+                throw new InvalidOperationException(
+                    "Windows did not start the administrator copy of Shackles.");
+            }
+
+            OpenElevatedWespButton.IsEnabled = false;
+            ElevationLaunchStatusText.Text =
+                "An administrator copy is opening directly on WESP Blocking. This window remains open.";
+            ElevationLaunchStatusText.Visibility = Visibility.Visible;
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == ErrorCancelled)
+        {
+            ElevationLaunchStatusText.Text =
+                "The administrator prompt was canceled. You can try again when you are ready.";
+            ElevationLaunchStatusText.Visibility = Visibility.Visible;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ElevationLaunchStatusText.Text =
+                $"Shackles could not open an administrator copy: {exception.Message}";
+            ElevationLaunchStatusText.Visibility = Visibility.Visible;
         }
     }
 
@@ -289,15 +407,14 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         object sender,
         RoutedEventArgs e)
     {
-        if (!TryNormalizeExistingExecutable(
+        if (!TryNormalizeChildExecutableName(
                 BlockedChildExecutableTextBox,
-                out var path))
+                out var imageName))
         {
             return;
         }
 
-        var imageName = Path.GetFileName(path);
-        if (AddUniqueExecutable(_blockedChildExecutables, path))
+        if (AddUniqueExecutableName(_blockedChildExecutables, imageName))
         {
             ShowNotice(
                 $"{imageName} was added. It will be blocked by name regardless of folder in this process tree.");
@@ -1339,6 +1456,69 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         return true;
     }
 
+    private bool TryNormalizeChildExecutableName(
+        TextBox source,
+        out string imageName)
+    {
+        imageName = string.Empty;
+        if (string.IsNullOrWhiteSpace(source.Text) || source.Text.Any(char.IsControl))
+        {
+            ShowNotice(
+                "Enter an executable name, such as powershell.exe, or browse to an application.");
+            source.Focus();
+            return false;
+        }
+
+        try
+        {
+            var entered = source.Text;
+            var trimmed = entered.Trim();
+            var candidate = trimmed.Length >= 2 &&
+                            trimmed[0] == '"' &&
+                            trimmed[^1] == '"'
+                ? trimmed[1..^1]
+                : entered.TrimStart();
+            if (candidate.Length == 0 ||
+                candidate.Any(char.IsControl) ||
+                candidate.Contains('"'))
+            {
+                throw new ArgumentException(
+                    "The executable name contains an invalid character.");
+            }
+
+            imageName = Path.GetFileName(candidate);
+            if (!string.Equals(candidate, imageName, StringComparison.Ordinal) &&
+                !Path.IsPathFullyQualified(candidate))
+            {
+                ShowNotice(
+                    "Enter only an executable name or a fully qualified path to an application.");
+                source.Focus();
+                return false;
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ShowNotice($"The executable name is invalid: {exception.Message}");
+            source.Focus();
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(imageName) ||
+            imageName is "." or ".." ||
+            imageName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            imageName.EndsWith('.') ||
+            imageName.EndsWith(' '))
+        {
+            ShowNotice(
+                "Enter a valid executable file name, such as powershell.exe. You may also paste a full path.");
+            source.Focus();
+            return false;
+        }
+
+        return true;
+    }
+
     private static WespResourceRuleDraft? FindRule(
         IEnumerable<WespResourceRuleDraft> rules,
         string path) => rules.FirstOrDefault(rule => string.Equals(
@@ -1346,20 +1526,19 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             path,
             StringComparison.OrdinalIgnoreCase));
 
-    private static bool AddUniqueExecutable(
-        ObservableCollection<string> paths,
-        string path)
+    private static bool AddUniqueExecutableName(
+        ObservableCollection<string> imageNames,
+        string imageName)
     {
-        var imageName = Path.GetFileName(path);
-        if (paths.Any(item => string.Equals(
-                Path.GetFileName(item),
+        if (imageNames.Any(item => string.Equals(
+                item,
                 imageName,
                 StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
-        paths.Add(path);
+        imageNames.Add(imageName);
         return true;
     }
 

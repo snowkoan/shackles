@@ -120,16 +120,21 @@ service state.
 
 ### Basic usage
 
-1. Run Shackles as administrator and open the **WESP Blocking** tab. Wait for
-   **WESP client is available**, or use **Refresh support**.
+1. Open the **WESP Blocking** tab. If this Shackles window is not running at
+   high integrity, the workspace stays locked and offers **Open WESP Blocking
+   as administrator**, which opens a separate elevated copy directly on this
+   tab. In the elevated window, wait for **WESP client is available**, or use
+   **Refresh support**.
 2. On **Files**, add existing folders as **Blocked** or **Read-only**. Optionally
    select **Block access to UNC paths** to cover network paths such as
    `\\server\share`.
 3. On **Registry**, add a key as **Blocked** or **Read-only**. The key need not
    exist yet; HKCU, HKLM, HKCR, HKU, and canonical `\REGISTRY\MACHINE` or
    `\REGISTRY\USER` paths are accepted.
-4. On **Child applications**, choose executables that the tagged process tree
-   must not start. Matching uses the executable name only, regardless of folder.
+4. On **Child applications**, enter an executable name such as `powershell.exe`,
+   or browse or paste a full path as a convenience. The file does not need to
+   exist; Shackles keeps only its final name. Matching is case-insensitive but
+   otherwise exact, including the extension and regardless of folder.
 5. To launch a new root, choose its executable, optional arguments, and optional
    working directory, then select **Start WESP Blocking and launch**. The root is
    created suspended and runs only after WESP has tagged it.

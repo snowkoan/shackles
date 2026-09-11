@@ -48,6 +48,7 @@ public sealed class WespPolicyTests
         Assert.HasCount(1, normalized.BlockedRegistryKeys);
         Assert.HasCount(1, normalized.ReadOnlyRegistryKeys);
         Assert.HasCount(1, normalized.BlockedChildExecutables);
+        Assert.AreEqual("blocked.exe", normalized.BlockedChildExecutables[0]);
         Assert.IsTrue(normalized.BlockUncPaths);
         Assert.IsTrue(Path.IsPathFullyQualified(normalized.BlockedFilePaths[0]));
         Assert.AreEqual(readOnlyDirectory, normalized.ReadOnlyFilePaths[0]);
@@ -252,7 +253,69 @@ public sealed class WespPolicyTests
             }));
 
         Assert.AreEqual(WespOperation.ValidatePolicy, exception.Operation);
-        StringAssert.Contains(exception.Message, "must include a file name");
+        StringAssert.Contains(exception.Message, "valid executable file name");
+    }
+
+    [TestMethod]
+    public void NormalizeBlockedChildrenStoresDistinctFinalImageNamesWithoutRequiringExistence()
+    {
+        var normalized = WespPolicyNormalizer.Normalize(EmptyPolicy() with
+        {
+            BlockedChildExecutables =
+            [
+                "powershell.exe",
+                @"Z:\Definitely\Not\Present\POWERSHELL.EXE",
+                "name",
+                "name.exe",
+                @"""C:\Program Files\Tools\utility.com"""
+            ]
+        });
+
+        Assert.HasCount(4, normalized.BlockedChildExecutables);
+        Assert.AreEqual("powershell.exe", normalized.BlockedChildExecutables[0]);
+        Assert.AreEqual("name", normalized.BlockedChildExecutables[1]);
+        Assert.AreEqual("name.exe", normalized.BlockedChildExecutables[2]);
+        Assert.AreEqual("utility.com", normalized.BlockedChildExecutables[3]);
+    }
+
+    [TestMethod]
+    public void NormalizeRejectsInvalidBlockedChildImageNames()
+    {
+        string[] invalidNames =
+        [
+            string.Empty,
+            "bad\0name.exe",
+            "bad\nname.exe",
+            ".",
+            "..",
+            Path.GetPathRoot(Environment.SystemDirectory)!,
+            @"C:\folder\",
+            @"tools\bad.exe",
+            @".\bad.exe",
+            @"C:bad.exe",
+            @"%SystemRoot%\System32\bad.exe",
+            @"""C:\folder\bad.exe",
+            @"C:\folder\bad.exe""",
+            @"""C:\one.exe"" ""D:\two.exe""",
+            @"C:\bad""folder\good.exe",
+            "bad?.exe",
+            "bad*.exe",
+            "bad|name.exe",
+            "bad:name.exe",
+            "bad.exe.",
+            "bad.exe "
+        ];
+
+        foreach (var invalidName in invalidNames)
+        {
+            var exception = Assert.ThrowsExactly<WespException>(() =>
+                WespPolicyNormalizer.Normalize(EmptyPolicy() with
+                {
+                    BlockedChildExecutables = [invalidName]
+                }), invalidName);
+
+            Assert.AreEqual(WespOperation.ValidatePolicy, exception.Operation);
+        }
     }
 
     [TestMethod]

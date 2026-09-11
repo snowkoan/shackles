@@ -50,6 +50,17 @@ public static class WespSupport
         "EspIsRegistryKeyPropertySupported"
     ];
 
+    /// <summary>
+    /// Determines whether the current process has the integrity level required
+    /// to connect a WESP client session.
+    /// </summary>
+    /// <remarks>
+    /// This is an early user-interface check. Session creation verifies the
+    /// integrity level again before connecting to WESP.
+    /// </remarks>
+    public static bool IsCurrentProcessHighIntegrity() =>
+        WespProcessIntegrityProbe.IsCurrentProcessHighIntegrity();
+
     public static WespSupportInfo Probe() => ProbeCore(
         SessionExports,
         "The WESP client does not expose every API needed to connect a blocking session.");

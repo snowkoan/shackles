@@ -21,6 +21,11 @@ public sealed partial class MainWindow : Window, IDisposable
         _viewModel = new MainViewModel(new JobControlService());
         DataContext = _viewModel;
         Loaded += async (_, _) => await _viewModel.InitializeAsync().ConfigureAwait(true);
+
+        if (App.ShouldOpenWespWorkspace)
+        {
+            WespWorkspaceTab.IsChecked = true;
+        }
     }
 
     private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e)

@@ -36,7 +36,7 @@ internal static class WespPolicyNormalizer
             readOnlyFiles,
             blockedRegistry,
             readOnlyRegistry,
-            NormalizeFiles(policy.BlockedChildExecutables, nameof(policy.BlockedChildExecutables)),
+            NormalizeFileNames(policy.BlockedChildExecutables, nameof(policy.BlockedChildExecutables)),
             policy.BlockUncPaths);
     }
 
@@ -266,7 +266,7 @@ internal static class WespPolicyNormalizer
         return normalized;
     }
 
-    private static string[] NormalizeFiles(
+    private static string[] NormalizeFileNames(
         IReadOnlyList<string>? paths,
         string parameterName)
     {
@@ -275,21 +275,69 @@ internal static class WespPolicyNormalizer
             throw new ArgumentNullException(parameterName);
         }
 
-        var normalized = paths
-            .Select(path => NormalizePath(path, parameterName))
+        return paths
+            .Select(path => NormalizeFileName(path, parameterName))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        foreach (var path in normalized)
+    }
+
+    private static string NormalizeFileName(string path, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Any(char.IsControl))
         {
-            if (string.IsNullOrWhiteSpace(Path.GetFileName(path)))
-            {
-                throw new WespException(
-                    WespOperation.ValidatePolicy,
-                    $"A blocked child application path must include a file name: {path}");
-            }
+            throw new WespException(
+                WespOperation.ValidatePolicy,
+                $"A valid blocked child application name is required for {parameterName}.");
         }
 
-        return normalized;
+        string imageName;
+        try
+        {
+            var trimmed = path.Trim();
+            var candidate = trimmed.Length >= 2 &&
+                            trimmed[0] == '"' &&
+                            trimmed[^1] == '"'
+                ? trimmed[1..^1]
+                : path.TrimStart();
+            if (candidate.Length == 0 ||
+                candidate.Any(char.IsControl) ||
+                candidate.Contains('"'))
+            {
+                throw new ArgumentException(
+                    "The executable name contains an invalid character.",
+                    parameterName);
+            }
+
+            imageName = Path.GetFileName(candidate);
+            if (!string.Equals(candidate, imageName, StringComparison.Ordinal) &&
+                !Path.IsPathFullyQualified(candidate))
+            {
+                throw new ArgumentException(
+                    "Enter an executable name or a fully qualified path.",
+                    parameterName);
+            }
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new WespException(
+                WespOperation.ValidatePolicy,
+                $"The blocked child application name is invalid: {path}",
+                innerException: exception);
+        }
+
+        if (string.IsNullOrWhiteSpace(imageName) ||
+            imageName is "." or ".." ||
+            imageName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            imageName.EndsWith('.') ||
+            imageName.EndsWith(' '))
+        {
+            throw new WespException(
+                WespOperation.ValidatePolicy,
+                $"A blocked child application must include a valid executable file name: {path}");
+        }
+
+        return imageName;
     }
 
     private static string[] NormalizeRegistryKeys(

@@ -14,6 +14,16 @@ internal static class WespProcessIntegrityProbe
     private const uint SecurityMandatorySystemRid = 0x4000;
     private const uint SecurityMandatoryProtectedProcessRid = 0x5000;
 
+    internal static bool IsCurrentProcessHighIntegrity()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        return IsHighIntegrity(GetCurrentIntegrityRid());
+    }
+
     internal static void EnsureHighIntegrity()
     {
         if (!OperatingSystem.IsWindows())
