@@ -9,8 +9,9 @@ Shackles is also an exploration workbench for restrictions that Windows actually
 ## Experience
 
 Each Windows mechanism gets a focused workspace. Jobs and WESP Blocking support
-attach and launch; identity and sandbox policy are launch-only. Every view states
-scope, lifetime, permissions, host changes, and the verified result.
+attach and launch; identity and sandbox policy are launch-only; WFP Blocking
+targets a full-path application identity rather than a particular process. Every
+view states scope, lifetime, permissions, host changes, and the verified result.
 
 The interface stays calm and readable. Detailed evidence appears when useful, and predictably unavailable actions are disabled. Availability and support status are reported as observed properties, not used as a reason to hide an otherwise explorable mechanism at build time.
 
@@ -25,6 +26,12 @@ The interface stays calm and readable. Detailed evidence appears when useful, an
   to tagged processes and future children. It is default-allow, makes no
   persistent permission changes, and is presented as a preview proof of concept
   rather than a sandbox.
+- **WFP Blocking:** install default-allow network block rules for Windows' ALE
+  application identity derived from a full executable path, optionally narrowed
+  to the current user, direction, IP family, local/remote CIDR, protocol, exact
+  port, or stable local-interface LUID. Policy is configured from user mode but
+  enforced by Windows. Rules live in a dynamic BFE session, are explicitly
+  removed on normal close, and are removed by BFE if the client disappears.
 
 The mechanisms remain separate. Unsupported features stay unavailable rather than being emulated.
 
@@ -33,14 +40,19 @@ The mechanisms remain separate. Unsupported features stay unavailable rather tha
 1. Improve diagnostics, verified policy read-back, cleanup evidence, and reusable configurations.
 2. Generalize launch targets across Win32 paths, packaged Win32 apps, and UWP activation by querying the system dynamically.
 3. Add reversible controls such as EcoQoS, memory priority, affinity, and preferred processors.
-4. Explore a separate Windows Filtering Platform workspace for executable- or user-scoped network blocking.
+4. Extend WFP Blocking with separate bind/listen/raw-endpoint controls, ranges
+   and groups, profile and richer interface matching, explicit loopback and
+   packaged-app identity, allowlist policy, and filter/event inspection.
 5. Follow the supported successor to the experimental APIs while keeping AppContainer independent.
 
 Controls cannot undo activity that already happened. For a new launch, WESP
 Blocking installs its rules before creating the suspended root process and resumes
 it only after the process context is attached. For an existing process, it verifies
 the selected process identity immediately before tagging it, then applies only to
-later covered operations and children started afterward.
+later covered operations and children started afterward. WFP Blocking instead
+changes stateful ALE policy for every matching application identity; Windows can
+reauthorize an existing flow after a policy change, and replies belong to the
+flow that authorized them rather than to an independent packet direction.
 
 ## Principles
 

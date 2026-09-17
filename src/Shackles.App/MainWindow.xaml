@@ -57,6 +57,12 @@
                                          Checked="WespWorkspaceTab_Click"
                                          Content="_WESP Blocking"
                                          AutomationProperties.Name="Show WESP Blocking workspace" />
+                            <RadioButton x:Name="WfpWorkspaceTab"
+                                         GroupName="Workspace"
+                                         Style="{StaticResource WorkspaceTabStyle}"
+                                         Checked="WfpWorkspaceTab_Click"
+                                         Content="W_FP Blocking"
+                                         AutomationProperties.Name="Show WFP Blocking workspace" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -248,6 +254,8 @@
                                                     Visibility="Collapsed" />
             <views:WespWorkspaceView x:Name="WespWorkspace"
                                      Visibility="Collapsed" />
+            <views:WfpWorkspaceView x:Name="WfpWorkspace"
+                                    Visibility="Collapsed" />
         </Grid>
     </DockPanel>
 </Window>

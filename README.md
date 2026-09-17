@@ -15,6 +15,7 @@ It is intentionally an exploration workbench, not only a polished wrapper around
 | **App Containers** | Launch only | AppContainer/LPAC identity, capabilities, and resource grants | Reusable profile/SID; file access through temporary ACLs or experimental BFS; registry access through ACLs |
 | **Experimental Sandboxes** | Launch only | Experimental identity, path, network, and UI policy | Dynamically probed; no host ACL changes |
 | **WESP Blocking (preview)** | Attach or launch | Block or make read-only selected folders and registry keys; optionally block UNC paths; block selected child executable names | Client-session rules scoped by process context; no persistent permission changes |
+| **WFP Blocking** | Full-path application identity | Block inbound/outbound ALE authorization; optionally scope by user, IP/CIDR, protocol, port, or interface | Dynamic BFE session; explicit normal cleanup and automatic crash cleanup |
 
 The workspaces are not interchangeable. Job Objects and WESP Blocking can accept
 running processes, while identity and sandbox policy must be applied at launch.
@@ -22,7 +23,10 @@ Job Objects and WESP Blocking use the same searchable, refreshable running-proce
 picker; each workspace then presents its own confirmation and result semantics.
 Applying WESP Blocking to a running process affects its later operations and
 children it starts afterward; it cannot undo earlier operations or tag descendants
-that are already running. Experimental status is descriptive rather than
+that are already running. WFP Blocking is different again: it does not attach to
+a PID or launch a target, but applies to every execution Windows classifies with
+the configured full-path application identity. Experimental status is
+descriptive rather than
 exclusionary: it changes the warnings, evidence, and availability checks, not
 whether a mechanism is considered worth exploring.
 
@@ -204,6 +208,47 @@ rows are left unknown until that notification layout is validated.
 > work, path aliases, pre-existing mappings, and WESP events absent from the
 > tested preview remain outside the current claim.
 
+## WFP Blocking workspace
+
+WFP Blocking installs ordinary block filters through the documented Windows
+Filtering Platform management API. Shackles remains a user-mode policy client;
+Windows enforces the rules at its stateful Application Layer Enforcement (ALE)
+authorization layers. The workspace does not install a driver, launch or attach
+to a process, or change target permissions.
+
+See the [WFP Blocking design and usage guide](docs/WFP-BLOCKING.md) for the full
+identity, matching, direction, lifecycle, and future-extension model.
+
+The executable selector requires an existing, fully qualified path. Windows
+derives `FWPM_CONDITION_ALE_APP_ID` from that path, so this is not basename,
+hash, signer, or PID matching. A rule can cover inbound, outbound, or both across
+IPv4 and/or IPv6, then optionally narrow the block by the current user's ALE
+identity, local or remote address/CIDR, TCP/UDP or best-effort ICMP, one exact
+local or remote port, and one local interface LUID. All selected scopes must
+match.
+
+IPv4-only rules include a V6 ALE companion constrained to IPv4-mapped addresses,
+covering true dual-stack sockets that Windows may not classify at the V4 layer.
+
+Inbound and outbound describe how an ALE flow is initiated. Outbound rules
+authorize TCP connects and first outbound datagrams; inbound rules authorize TCP
+accepts and first inbound datagrams. Replies remain part of an authorized flow,
+and Windows may reauthorize flows after a policy change. The current workspace
+does not separately prevent bind, listen, or raw-socket creation.
+
+> [!IMPORTANT]
+> Changing WFP policy requires **Run as administrator**. An unelevated workspace
+> stays locked and offers **Open WFP Blocking as administrator**, opening a
+> separate elevated copy directly on that workspace.
+
+WFP can create persistent filters, but Shackles intentionally uses a dynamic BFE
+session. Normal close transactionally removes every filter, then the private
+sublayer and provider. If Shackles exits unexpectedly, BFE removes the same
+dynamic objects when its RPC session ends. Session, rule, and filter GUIDs appear
+in display names; provider data carries the Shackles marker plus session and
+rule IDs. That makes live policy attributable and supports later enumeration
+without relying on a friendly filename.
+
 ## App Containers workspace
 
 Each card creates a unique profile and SID on its first successful launch and reuses that identity later. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and explicit file or registry grants.
@@ -341,6 +386,10 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 - **Windows Endpoint Security Platform API Specification, Rev 3.2**, supplied
   with the WESP preview SDK
+- [Windows Filtering Platform](https://learn.microsoft.com/en-us/windows/win32/fwp/windows-filtering-platform-start-page)
+- [Application Layer Enforcement](https://learn.microsoft.com/en-us/windows/win32/fwp/application-layer-enforcement--ale-)
+- [ALE layers](https://learn.microsoft.com/en-us/windows/win32/fwp/ale-layers)
+- [WFP object management and dynamic sessions](https://learn.microsoft.com/en-us/windows/win32/fwp/object-management)
 - [AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation)
 - [`CreateAppContainerProfile`](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createappcontainerprofile)
 - [`PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`](https://learn.microsoft.com/en-us/windows/win32/procthread/attribute-list)
@@ -358,4 +407,4 @@ If a GUI is not important, [Process Governor](https://github.com/lowleveldesign/
 
 ## Security notes
 
-Shackles requests the minimum job, process, token, and ACL rights needed for each operation, owns native resources with safe handles, validates input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL mutations and BFS cleanup intent are journaled before application; ACL cleanup removes only entries whose SID and access match the tracked grant. Experimental feature state is queried, never written. WESP client connection requires high integrity, but WESP Blocking does not grant access or rewrite target file or registry permissions; its rules and process context are client-session scoped. Shackles contains no credentials, cryptographic material, or certificate data.
+Shackles requests the minimum job, process, token, ACL, and policy rights needed for each operation, owns native resources with safe handles, validates input, and rechecks process identity before assignment to reduce PID-reuse mistakes. AppContainer ACL mutations and BFS cleanup intent are journaled before application; ACL cleanup removes only entries whose SID and access match the tracked grant. Experimental feature state is queried, never written. WESP client connection requires high integrity, but WESP Blocking does not grant access or rewrite target file or registry permissions; its rules and process context are client-session scoped. WFP policy changes also require high integrity; Shackles uses block-only filters in a dynamic session and explicitly removes them on normal close. Shackles contains no credentials, cryptographic material, or certificate data.

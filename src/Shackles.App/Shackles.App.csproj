@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Shackles.AppContainers\Shackles.AppContainers.csproj" />
     <ProjectReference Include="..\Shackles.ExperimentalSandboxes\Shackles.ExperimentalSandboxes.csproj" />
     <ProjectReference Include="..\Shackles.JobObjects\Shackles.JobObjects.csproj" />
+    <ProjectReference Include="..\Shackles.Wfp\Shackles.Wfp.csproj" />
     <ProjectReference Include="..\Shackles.Wesp\Shackles.Wesp.csproj" />
   </ItemGroup>
 

@@ -22,7 +22,11 @@ public sealed partial class MainWindow : Window, IDisposable
         DataContext = _viewModel;
         Loaded += async (_, _) => await _viewModel.InitializeAsync().ConfigureAwait(true);
 
-        if (App.ShouldOpenWespWorkspace)
+        if (App.ShouldOpenWfpWorkspace)
+        {
+            WfpWorkspaceTab.IsChecked = true;
+        }
+        else if (App.ShouldOpenWespWorkspace)
         {
             WespWorkspaceTab.IsChecked = true;
         }
@@ -33,7 +37,8 @@ public sealed partial class MainWindow : Window, IDisposable
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
             ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null)
+            WespWorkspace is null ||
+            WfpWorkspace is null)
         {
             return;
         }
@@ -42,6 +47,7 @@ public sealed partial class MainWindow : Window, IDisposable
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
         WespWorkspace.Visibility = Visibility.Collapsed;
+        WfpWorkspace.Visibility = Visibility.Collapsed;
     }
 
     private void AppContainerWorkspaceTab_Click(object sender, RoutedEventArgs e)
@@ -49,7 +55,8 @@ public sealed partial class MainWindow : Window, IDisposable
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
             ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null)
+            WespWorkspace is null ||
+            WfpWorkspace is null)
         {
             return;
         }
@@ -58,6 +65,7 @@ public sealed partial class MainWindow : Window, IDisposable
         AppContainerWorkspace.Visibility = Visibility.Visible;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
         WespWorkspace.Visibility = Visibility.Collapsed;
+        WfpWorkspace.Visibility = Visibility.Collapsed;
         AppContainerWorkspace.PrepareForDisplay();
     }
 
@@ -68,7 +76,8 @@ public sealed partial class MainWindow : Window, IDisposable
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
             ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null)
+            WespWorkspace is null ||
+            WfpWorkspace is null)
         {
             return;
         }
@@ -77,6 +86,7 @@ public sealed partial class MainWindow : Window, IDisposable
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Visible;
         WespWorkspace.Visibility = Visibility.Collapsed;
+        WfpWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.PrepareForDisplay();
     }
 
@@ -85,7 +95,8 @@ public sealed partial class MainWindow : Window, IDisposable
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
             ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null)
+            WespWorkspace is null ||
+            WfpWorkspace is null)
         {
             return;
         }
@@ -94,7 +105,27 @@ public sealed partial class MainWindow : Window, IDisposable
         AppContainerWorkspace.Visibility = Visibility.Collapsed;
         ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
         WespWorkspace.Visibility = Visibility.Visible;
+        WfpWorkspace.Visibility = Visibility.Collapsed;
         WespWorkspace.PrepareForDisplay();
+    }
+
+    private void WfpWorkspaceTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (JobObjectsWorkspace is null ||
+            AppContainerWorkspace is null ||
+            ExperimentalSandboxWorkspace is null ||
+            WespWorkspace is null ||
+            WfpWorkspace is null)
+        {
+            return;
+        }
+
+        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
+        AppContainerWorkspace.Visibility = Visibility.Collapsed;
+        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
+        WespWorkspace.Visibility = Visibility.Collapsed;
+        WfpWorkspace.Visibility = Visibility.Visible;
+        WfpWorkspace.PrepareForDisplay();
     }
 
     private async void NewJob_Click(object sender, RoutedEventArgs e)
@@ -371,14 +402,17 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         if (AppContainerWorkspace.IsBusy ||
             ExperimentalSandboxWorkspace.IsBusy ||
-            WespWorkspace.IsBusy)
+            WespWorkspace.IsBusy ||
+            WfpWorkspace.IsBusy)
         {
             e.Cancel = true;
             var workspace = AppContainerWorkspace.IsBusy
                 ? "AppContainer"
                 : ExperimentalSandboxWorkspace.IsBusy
                     ? "experimental sandbox"
-                    : "WESP Blocking";
+                    : WespWorkspace.IsBusy
+                        ? "WESP Blocking"
+                        : "WFP Blocking";
             MessageBox.Show(
                 this,
                 $"Wait for the current {workspace} operation to finish before closing Shackles.",
@@ -412,11 +446,14 @@ public sealed partial class MainWindow : Window, IDisposable
                 ExperimentalSandboxWorkspace.TrackedLaunchCount;
             var wespTrackedCount = WespWorkspace.TrackedLaunchCount;
             var wespHasActiveSession = WespWorkspace.HasActiveSession;
+            var wfpRuleCount = WfpWorkspace.ActiveRuleCount;
+            var wfpHasActivePolicy = WfpWorkspace.HasActivePolicy;
             if (killOnCloseJobs.Length > 0 ||
                 liveNotificationJobs.Length > 0 ||
                 appContainerTrackedCount > 0 ||
                 experimentalTrackedCount > 0 ||
-                wespHasActiveSession)
+                wespHasActiveSession ||
+                wfpHasActivePolicy)
             {
                 var warnings = new List<string>();
                 if (killOnCloseJobs.Length > 0)
@@ -463,6 +500,14 @@ public sealed partial class MainWindow : Window, IDisposable
                         "will not be terminated; surviving processes and descendants may continue unrestricted.");
                 }
 
+                if (wfpHasActivePolicy)
+                {
+                    warnings.Add(
+                        $"Closing removes {wfpRuleCount} active WFP block rule" +
+                        $"{(wfpRuleCount == 1 ? string.Empty : "s")}. Other firewall and WFP policies remain in force. " +
+                        "The rules are also dynamic, so BFE removes them if Shackles exits unexpectedly.");
+                }
+
                 var answer = MessageBox.Show(
                     this,
                     $"{string.Join("\n\n", warnings)}\n\nClose Shackles anyway?",
@@ -494,6 +539,7 @@ public sealed partial class MainWindow : Window, IDisposable
         AppContainerWorkspace.Dispose();
         ExperimentalSandboxWorkspace.Dispose();
         WespWorkspace.Dispose();
+        WfpWorkspace.Dispose();
         _viewModel.Dispose();
     }
 }
