@@ -1,10 +1,12 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Input;
 using Shackles.App.Dialogs;
 using Shackles.App.Models;
 using Shackles.App.Services;
 using Shackles.App.ViewModels;
+using Shackles.Wfp;
 
 namespace Shackles.App;
 
@@ -18,6 +20,7 @@ public sealed partial class MainWindow : Window, IDisposable
     public MainWindow()
     {
         InitializeComponent();
+        ConfigureElevationIndicator();
         _viewModel = new MainViewModel(new JobControlService());
         DataContext = _viewModel;
         Loaded += async (_, _) => await _viewModel.InitializeAsync().ConfigureAwait(true);
@@ -30,6 +33,33 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             WespWorkspaceTab.IsChecked = true;
         }
+    }
+
+    private void ConfigureElevationIndicator()
+    {
+        string description;
+        try
+        {
+            if (!WfpSupport.IsCurrentProcessHighIntegrity())
+            {
+                return;
+            }
+
+            Title = "Shackles (Administrator)";
+            description = "This Shackles process is running elevated with administrator privileges.";
+            AutomationProperties.SetName(ElevationBadgeText, "Shackles is running as administrator (elevated)");
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Title = "Shackles (Elevation unknown)";
+            ElevationBadgeText.Text = "Elevation unknown";
+            description = $"Shackles could not determine whether this process is running elevated. {exception.Message}";
+            AutomationProperties.SetName(ElevationBadgeText, "Shackles elevation status is unknown");
+        }
+
+        ElevationBadge.ToolTip = description;
+        AutomationProperties.SetHelpText(ElevationBadgeText, description);
+        ElevationBadge.Visibility = Visibility.Visible;
     }
 
     private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e)

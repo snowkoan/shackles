@@ -67,7 +67,37 @@
                     </Border>
                 </StackPanel>
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock FontSize="21" FontWeight="SemiBold" Text="Shackles" />
+                    <WrapPanel VerticalAlignment="Center">
+                        <TextBlock Margin="0,0,12,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="21"
+                                   FontWeight="SemiBold"
+                                   Text="Shackles" />
+                        <Border x:Name="ElevationBadge"
+                                Padding="9,5"
+                                VerticalAlignment="Center"
+                                Background="{DynamicResource AccentBrush}"
+                                BorderBrush="{DynamicResource AccentTextBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal">
+                                <Viewbox Width="20" Height="23"
+                                         Margin="0,0,7,0"
+                                         VerticalAlignment="Center">
+                                    <Path Data="M 12,1 L 21,4 L 21,10 C 21,16 17,21 12,24 C 7,21 3,16 3,10 L 3,4 Z M 12,1 L 12,24 M 3,10 L 21,10"
+                                          Stroke="{DynamicResource AccentTextBrush}"
+                                          StrokeThickness="1.8"
+                                          StrokeLineJoin="Round" />
+                                </Viewbox>
+                                <TextBlock x:Name="ElevationBadgeText"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AccentTextBrush}"
+                                           FontWeight="SemiBold"
+                                           Text="Administrator" />
+                            </StackPanel>
+                        </Border>
+                    </WrapPanel>
                     <TextBlock Style="{StaticResource CaptionStyle}" Text="Windows process restriction control center" />
                 </StackPanel>
             </DockPanel>
@@ -98,7 +128,12 @@
 
         <Grid Margin="14">
             <Grid x:Name="JobObjectsWorkspace">
-            <Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          AutomationProperties.Name="Job Objects workspace content">
+            <!-- Keep room for the editor; scroll the workspace at small window heights. -->
+            <Grid Height="{Binding ActualHeight, ElementName=JobObjectsWorkspace}"
+                  MinHeight="650">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" MaxHeight="190" />
@@ -246,6 +281,7 @@
                     </Grid>
                 </Border>
             </Grid>
+            </ScrollViewer>
             </Grid>
 
             <views:AppContainerWorkspaceView x:Name="AppContainerWorkspace"

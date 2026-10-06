@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Shackles.App.Infrastructure;
@@ -17,8 +18,6 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     private LoadedTextValue<ulong> _loadedMaximumWorkingSet;
     private LoadedTextValue<ulong> _loadedProcessMemory;
     private LoadedTextValue<ulong> _loadedJobMemory;
-    private LoadedTextValue<double> _loadedNetworkBandwidth;
-    private ulong? _loadedExactNetworkBandwidthBytes;
     private LoadedTextValue<TimeSpan> _loadedNotifyJobTime;
     private LoadedTextValue<ulong> _loadedNotifyJobMemory;
     private LoadedTextValue<ulong> _loadedNotifyLowMemory;
@@ -59,7 +58,9 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     private bool _usesUnsupportedPerProcessorCaps;
 
     private bool _networkBandwidthEnabled;
-    private string _networkBandwidthMbps = "10";
+    private string _networkBandwidthValue = 1.25m.ToString(CultureInfo.CurrentCulture);
+    private NetworkBandwidthUnit _networkBandwidthUnit = NetworkBandwidthUnit.MegabytesPerSecond;
+    private decimal? _canonicalNetworkBandwidthBytes;
     private bool _dscpEnabled;
     private string _dscpTag = "0";
 
@@ -100,6 +101,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     public IReadOnlyList<CpuControlMode> CpuModes { get; } = Enum.GetValues<CpuControlMode>();
     public IReadOnlyList<RateTolerance> ToleranceChoices { get; } = Enum.GetValues<RateTolerance>();
     public IReadOnlyList<RateToleranceInterval> ToleranceIntervalChoices { get; } = Enum.GetValues<RateToleranceInterval>();
+    public IReadOnlyList<NetworkBandwidthUnit> NetworkBandwidthUnits { get; } = NetworkBandwidthUnit.All;
     public RestrictionEditorViewModel(bool canPostEndOfJobNotification)
     {
         _canPostEndOfJobNotification = canPostEndOfJobNotification;
@@ -176,7 +178,63 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     public bool CanEditCpu => !UsesUnsupportedPerProcessorCaps;
 
     public bool NetworkBandwidthEnabled { get => _networkBandwidthEnabled; set => SetDraft(ref _networkBandwidthEnabled, value); }
-    public string NetworkBandwidthMbps { get => _networkBandwidthMbps; set => SetDraft(ref _networkBandwidthMbps, value); }
+    public string NetworkBandwidthValue
+    {
+        get => _networkBandwidthValue;
+        set
+        {
+            if (string.Equals(_networkBandwidthValue, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            // Clear before notifying observers, which can synchronously build the changed draft.
+            _canonicalNetworkBandwidthBytes = null;
+            SetDraft(ref _networkBandwidthValue, value);
+            OnPropertyChanged(nameof(CanChangeNetworkBandwidthUnit));
+        }
+    }
+
+    public NetworkBandwidthUnit NetworkBandwidthUnit
+    {
+        get => _networkBandwidthUnit;
+        set
+        {
+            if (value is null || value == _networkBandwidthUnit)
+            {
+                return;
+            }
+
+            if (!NetworkBandwidthUnits.Contains(value) ||
+                !TryGetNetworkBandwidthBytes(out var bytesPerSecond))
+            {
+                ValidationMessage = NetworkBandwidthValidationMessage;
+                OnPropertyChanged(nameof(NetworkBandwidthUnit));
+                return;
+            }
+
+            // Unit changes only change the presentation, including for exact native ulong values.
+            // Keep the canonical rate when decimal precision cannot express every fractional digit
+            // in the selected unit; re-parsing the display could change native byte rounding.
+            _canonicalNetworkBandwidthBytes = bytesPerSecond;
+            _networkBandwidthValue = FormatNetworkBandwidth(bytesPerSecond / value.BytesPerUnit);
+            SetProperty(ref _networkBandwidthUnit, value);
+            OnPropertyChanged(nameof(NetworkBandwidthValue));
+            OnPropertyChanged(nameof(CanChangeNetworkBandwidthUnit));
+        }
+    }
+
+    public bool CanChangeNetworkBandwidthUnit => TryGetNetworkBandwidthBytes(out _);
+
+    [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "WPF consumes this instance property through the editor data binding.")]
+    public string NetworkBandwidthHint =>
+        $"Fractional upload rates are allowed, e.g. {0.5m.ToString(CultureInfo.CurrentCulture)} MB/s = {500m.ToString(CultureInfo.CurrentCulture)} kB/s. " +
+        "1 kB = 1,000 bytes; 1 MB = 1,000,000 bytes. Rates are rounded to whole B/s (minimum 1 B/s).";
+
+    private string NetworkBandwidthValidationMessage =>
+        $"Maximum upload speed must be a number from {FormatNetworkBandwidth(1m / NetworkBandwidthUnit.BytesPerUnit)} " +
+        $"to {FormatNetworkBandwidth(ulong.MaxValue / NetworkBandwidthUnit.BytesPerUnit)} {NetworkBandwidthUnit.Symbol} " +
+        "(1 to 18,446,744,073,709,551,615 B/s). Fractional values are allowed.";
     public bool DscpEnabled { get => _dscpEnabled; set => SetDraft(ref _dscpEnabled, value); }
     public string DscpTag { get => _dscpTag; set => SetDraft(ref _dscpTag, value); }
 
@@ -214,6 +272,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     public void Load(RestrictionProfile profile)
     {
         _loading = true;
+        _canonicalNetworkBandwidthBytes = null;
         try
         {
             var hard = profile.HardLimits;
@@ -250,12 +309,22 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             CpuNotify = profile.Cpu.Notify;
             UsesUnsupportedPerProcessorCaps = profile.Cpu.UsesUnsupportedPerProcessorCaps;
 
-            var displayedBandwidth = profile.Network.MaximumBandwidthMegabitsPerSecond ??
-                (profile.Network.ExactMaximumBandwidthBytesPerSecond.HasValue
-                    ? profile.Network.ExactMaximumBandwidthBytesPerSecond.Value * 8d / 1_000_000d
-                    : null);
-            NetworkBandwidthEnabled = displayedBandwidth.HasValue;
-            NetworkBandwidthMbps = Format(displayedBandwidth, "10");
+            NetworkBandwidthEnabled = profile.Network.ExactMaximumBandwidthBytesPerSecond.HasValue ||
+                profile.Network.MaximumBandwidthMegabitsPerSecond.HasValue;
+            if (profile.Network.ExactMaximumBandwidthBytesPerSecond is { } exactBandwidth)
+            {
+                NetworkBandwidthValue = FormatNetworkBandwidth(exactBandwidth / NetworkBandwidthUnit.BytesPerUnit);
+            }
+            else if (profile.Network.MaximumBandwidthMegabitsPerSecond is { } bandwidth)
+            {
+                // Older profiles only have Mbit/s; keep the user's selected display unit on refresh.
+                var unitValue = bandwidth * (double)(125_000m / NetworkBandwidthUnit.BytesPerUnit);
+                NetworkBandwidthValue = unitValue.ToString("R", CultureInfo.CurrentCulture);
+            }
+            else
+            {
+                NetworkBandwidthValue = FormatNetworkBandwidth(1_250_000m / NetworkBandwidthUnit.BytesPerUnit);
+            }
             DscpEnabled = profile.Network.DscpTag.HasValue;
             DscpTag = Format(profile.Network.DscpTag, "0");
 
@@ -303,8 +372,6 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             _loadedMaximumWorkingSet = new(MaximumWorkingSetMb, hard.MaximumWorkingSetBytes, WorkingSetEnabled);
             _loadedProcessMemory = new(ProcessMemoryMb, hard.ProcessMemoryLimitBytes, ProcessMemoryEnabled);
             _loadedJobMemory = new(JobMemoryMb, hard.JobMemoryLimitBytes, JobMemoryEnabled);
-            _loadedNetworkBandwidth = new(NetworkBandwidthMbps, displayedBandwidth, NetworkBandwidthEnabled);
-            _loadedExactNetworkBandwidthBytes = profile.Network.ExactMaximumBandwidthBytesPerSecond;
             _loadedNotifyJobTime = new(NotifyJobTimeSeconds, notification.PerJobUserTime, NotifyJobTimeEnabled);
             _loadedNotifyJobMemory = new(NotifyJobMemoryMb, notification.JobMemoryBytes, NotifyJobMemoryEnabled);
             _loadedNotifyLowMemory = new(NotifyLowMemoryMb, notification.JobLowMemoryBytes, NotifyLowMemoryEnabled);
@@ -372,16 +439,10 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
                 SchedulingClassEnabled ? ParseUInt(SchedulingClass, "Scheduling class", 0, 9) : null);
 
             var cpu = BuildCpuSettings();
-            var networkBandwidth = NetworkBandwidthEnabled
-                ? PreserveOrParse(
-                    NetworkBandwidthMbps,
-                    _loadedNetworkBandwidth,
-                    () => ParseDouble(NetworkBandwidthMbps, "Maximum outbound bandwidth", 0.000001, 68_719_476_736d))
+            ulong? exactNetworkBandwidthBytes = NetworkBandwidthEnabled ? ParseNetworkBandwidthBytes() : null;
+            double? networkBandwidth = exactNetworkBandwidthBytes.HasValue
+                ? exactNetworkBandwidthBytes.Value / 125_000d
                 : null;
-            var exactNetworkBandwidthBytes = NetworkBandwidthEnabled &&
-                IsLoadedTextUnchanged(NetworkBandwidthMbps, _loadedNetworkBandwidth)
-                    ? _loadedExactNetworkBandwidthBytes
-                    : null;
             var network = new NetworkControlSettings(
                 networkBandwidth,
                 DscpEnabled ? (byte)ParseUInt(DscpTag, "DSCP tag", 0, 63) : null,
@@ -508,6 +569,39 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
 
     private static string FormatMebibytes(ulong? value, string fallback) =>
         value.HasValue ? (value.Value / 1024d / 1024d).ToString("0.###", CultureInfo.CurrentCulture) : fallback;
+
+    private static string FormatNetworkBandwidth(decimal value) =>
+        value.ToString("0.############################", CultureInfo.CurrentCulture);
+
+    private bool TryGetNetworkBandwidthBytes(out decimal bytesPerSecond)
+    {
+        if (_canonicalNetworkBandwidthBytes is { } canonicalBytes)
+        {
+            bytesPerSecond = canonicalBytes;
+            return true;
+        }
+
+        bytesPerSecond = 0;
+        if (!decimal.TryParse(NetworkBandwidthValue, NumberStyles.Float, CultureInfo.CurrentCulture, out var value) ||
+            value < 1m / NetworkBandwidthUnit.BytesPerUnit ||
+            value > ulong.MaxValue / NetworkBandwidthUnit.BytesPerUnit)
+        {
+            return false;
+        }
+
+        bytesPerSecond = value * NetworkBandwidthUnit.BytesPerUnit;
+        return true;
+    }
+
+    private ulong ParseNetworkBandwidthBytes()
+    {
+        if (!TryGetNetworkBandwidthBytes(out var bytesPerSecond))
+        {
+            throw new ValidationException(NetworkBandwidthValidationMessage);
+        }
+
+        return checked((ulong)decimal.Round(bytesPerSecond, 0, MidpointRounding.AwayFromZero));
+    }
 
     private static T? PreserveOrParse<T>(
         string currentText,

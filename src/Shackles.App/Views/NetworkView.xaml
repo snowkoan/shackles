@@ -33,28 +33,50 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <CheckBox IsChecked="{Binding Editor.NetworkBandwidthEnabled}"
-                              Content="Maximum outbound bandwidth" />
+                              Content="Maximum upload speed"
+                              ToolTip="Limits outbound traffic from processes in this Job Object." />
                     <TextBox Grid.Column="1"
                              Margin="8,3"
                              IsEnabled="{Binding Editor.NetworkBandwidthEnabled}"
-                             Text="{Binding Editor.NetworkBandwidthMbps, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBlock Grid.Column="2"
-                               Margin="7,0"
-                               VerticalAlignment="Center"
+                             AutomationProperties.Name="Maximum upload speed value"
+                             AutomationProperties.HelpText="{Binding Editor.NetworkBandwidthHint}"
+                             Text="{Binding Editor.NetworkBandwidthValue, UpdateSourceTrigger=PropertyChanged}" />
+                    <Grid Grid.Column="2"
+                          IsEnabled="{Binding Editor.NetworkBandwidthEnabled}">
+                        <ComboBox Margin="7,3"
+                                  MinWidth="100"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="Maximum upload speed unit"
+                                  AutomationProperties.HelpText="{Binding Editor.NetworkBandwidthUnit.Description}"
+                                  ItemsSource="{Binding Editor.NetworkBandwidthUnits}"
+                                  SelectedItem="{Binding Editor.NetworkBandwidthUnit}"
+                                  IsEnabled="{Binding Editor.CanChangeNetworkBandwidthUnit}"
+                                  ToolTip="{Binding Editor.NetworkBandwidthUnit.Description}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Symbol}" ToolTip="{Binding Description}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </Grid>
+                    <TextBlock Grid.Row="1"
+                               Grid.ColumnSpan="3"
+                               Margin="0,7,0,12"
                                Style="{StaticResource CaptionStyle}"
-                               Text="Mbit/s hard control" />
+                               Text="{Binding Editor.NetworkBandwidthHint}" />
 
-                    <CheckBox Grid.Row="1"
+                    <CheckBox Grid.Row="2"
                               IsChecked="{Binding Editor.DscpEnabled}"
                               Content="DSCP tag" />
-                    <TextBox Grid.Row="1"
+                    <TextBox Grid.Row="2"
                              Grid.Column="1"
                              Margin="8,3"
                              IsEnabled="{Binding Editor.DscpEnabled}"
                              Text="{Binding Editor.DscpTag, UpdateSourceTrigger=PropertyChanged}" />
-                    <TextBlock Grid.Row="1"
+                    <TextBlock Grid.Row="2"
                                Grid.Column="2"
                                Margin="7,0"
                                VerticalAlignment="Center"

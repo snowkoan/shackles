@@ -8,6 +8,7 @@
     <Project Path="src/Shackles.App/Shackles.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Shackles.App.Tests/Shackles.App.Tests.csproj" />
     <Project Path="tests/Shackles.AppContainers.Tests/Shackles.AppContainers.Tests.csproj" />
     <Project Path="tests/Shackles.ExperimentalSandboxes.Tests/Shackles.ExperimentalSandboxes.Tests.csproj" />
     <Project Path="tests/Shackles.JobObjects.Tests/Shackles.JobObjects.Tests.csproj" />
