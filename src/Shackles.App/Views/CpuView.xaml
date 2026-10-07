@@ -43,7 +43,7 @@
                       IsEnabled="{Binding Capabilities.CpuRateControl.CanSet}">
                 <StackPanel IsEnabled="{Binding Editor.CanEditCpu}">
                     <TextBlock Style="{StaticResource CaptionStyle}"
-                               Text="HardCap is an enforced ceiling. Rate, Weight, and MinimumMaximum are scheduling controls whose observed effect depends on system load." />
+                               Text="Hard cap enforces a ceiling. Scheduling rate, weight, and minimum/maximum allocations depend on system load. Choose a mode to enable its inputs." />
                     <Grid Margin="0,10,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="220" />
@@ -60,35 +60,41 @@
                         <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Mode" />
                         <ComboBox Grid.Column="1"
                                   Margin="5,3"
-                                  ItemsSource="{Binding Editor.CpuModes}"
-                                  SelectedItem="{Binding Editor.CpuMode}" />
+                                  ItemsSource="{Binding Editor.CpuModeChoices}"
+                                  DisplayMemberPath="Label"
+                                  SelectedValuePath="Value"
+                                  ToolTip="{Binding SelectedItem.Description, RelativeSource={RelativeSource Self}}"
+                                  SelectedValue="{Binding Editor.CpuMode}" />
 
                         <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="Rate / hard cap" />
                         <TextBox Grid.Row="1"
                                  Grid.Column="1"
                                  Margin="5,3"
+                                 IsEnabled="{Binding Editor.IsCpuRateInputEnabled}"
                                  Text="{Binding Editor.CpuRatePercent, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Grid.Row="1"
                                    Grid.Column="2"
                                    Margin="7,0"
                                    VerticalAlignment="Center"
                                    Style="{StaticResource CaptionStyle}"
-                                   Text="percent (Rate or HardCap)" />
+                                   Text="percent (scheduling rate or hard cap)" />
 
                         <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="Weight" />
                         <TextBox Grid.Row="2"
                                  Grid.Column="1"
                                  Margin="5,3"
+                                 IsEnabled="{Binding Editor.IsCpuWeightInputEnabled}"
                                  Text="{Binding Editor.CpuWeight, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Grid.Row="2"
                                    Grid.Column="2"
                                    Margin="7,0"
                                    VerticalAlignment="Center"
                                    Style="{StaticResource CaptionStyle}"
-                                   Text="1–9 (Weight mode)" />
+                                   Text="1–9 (1 lowest, 9 highest)" />
 
                         <TextBlock Grid.Row="3" Style="{StaticResource FieldLabelStyle}" Text="Minimum / maximum" />
-                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal"
+                                    IsEnabled="{Binding Editor.IsCpuMinimumMaximumInputEnabled}">
                             <TextBox Width="80"
                                      Margin="5,3"
                                      Text="{Binding Editor.CpuMinimumPercent, UpdateSourceTrigger=PropertyChanged}"
@@ -103,11 +109,12 @@
                                    Margin="7,0"
                                    VerticalAlignment="Center"
                                    Style="{StaticResource CaptionStyle}"
-                                   Text="percent (MinimumMaximum mode)" />
+                                   Text="percent (minimum and maximum mode)" />
 
                         <CheckBox Grid.Row="4"
                                   Grid.Column="1"
                                   Margin="5,5"
+                                  IsEnabled="{Binding Editor.IsCpuNotifyInputEnabled}"
                                   IsChecked="{Binding Editor.CpuNotify}"
                                   Content="Enable CPU rate notifications" />
                     </Grid>

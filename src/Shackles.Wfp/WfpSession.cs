@@ -11,13 +11,23 @@ public sealed class WfpSession : IDisposable
     private const ushort SubLayerWeight = 0x5000;
     private readonly object _gate = new();
     private readonly List<WfpInstalledRule> _rules = [];
+    private readonly Func<nint, uint> _closeEngine;
+    private readonly Func<ICollection<string>, bool>? _removeAllObjects;
     private nint _engine;
     private bool _closed;
 
     private WfpSession(Guid sessionKey, nint engine)
+        : this(sessionKey, engine, NativeMethods.FwpmEngineClose, null)
+    {
+    }
+
+    internal WfpSession(Guid sessionKey, nint engine, Func<nint, uint> closeEngine,
+        Func<ICollection<string>, bool>? removeAllObjects)
     {
         SessionKey = sessionKey;
         _engine = engine;
+        _closeEngine = closeEngine;
+        _removeAllObjects = removeAllObjects;
     }
 
     public Guid SessionKey { get; }
@@ -228,8 +238,8 @@ public sealed class WfpSession : IDisposable
             var ruleCount = _rules.Count;
             var filterCount = _rules.Sum(rule => rule.Filters.Count);
             var warnings = new List<string>();
-            var explicitRemovalSucceeded = TryRemoveAllObjects(warnings);
-            var closeResult = NativeMethods.FwpmEngineClose(_engine);
+            var explicitRemovalSucceeded = _removeAllObjects?.Invoke(warnings) ?? TryRemoveAllObjects(warnings);
+            var closeResult = _closeEngine(_engine);
             if (closeResult == 0)
             {
                 _engine = 0;
@@ -259,21 +269,9 @@ public sealed class WfpSession : IDisposable
 
     public void Dispose()
     {
-        var result = Close();
-        if (!result.DynamicSessionClosed)
-        {
-            lock (_gate)
-            {
-                if (_engine != 0)
-                {
-                    _ = NativeMethods.FwpmEngineClose(_engine);
-                    _engine = 0;
-                }
-
-                _closed = true;
-                _rules.Clear();
-            }
-        }
+        // A failed native close leaves ownership here so Close/Dispose can retry it.
+        // Close exposes the diagnostics to interactive callers.
+        _ = Close();
     }
 
     private static void InstallInfrastructure(nint engine, Guid sessionKey)

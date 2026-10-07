@@ -2,7 +2,9 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Input;
+using Shackles.App.Controls;
 using Shackles.App.Dialogs;
+using Shackles.App.Infrastructure;
 using Shackles.App.Models;
 using Shackles.App.Services;
 using Shackles.App.ViewModels;
@@ -16,14 +18,25 @@ public sealed partial class MainWindow : Window, IDisposable
     private bool _isOpeningNamedJob;
     private bool _closeConfirmed;
     private bool _disposed;
+    private bool _isClosing;
 
-    public MainWindow()
+    public MainWindow() : this(new MainViewModel(new JobControlService()))
+    {
+    }
+
+    internal MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         ConfigureElevationIndicator();
-        _viewModel = new MainViewModel(new JobControlService());
+        _viewModel = viewModel;
         DataContext = _viewModel;
-        Loaded += async (_, _) => await _viewModel.InitializeAsync().ConfigureAwait(true);
+        Loaded += async (_, _) =>
+        {
+            if (!_isClosing && !_disposed)
+            {
+                await _viewModel.InitializeAsync().ConfigureAwait(true);
+            }
+        };
 
         if (App.ShouldOpenWfpWorkspace)
         {
@@ -62,7 +75,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ElevationBadge.Visibility = Visibility.Visible;
     }
 
-    private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e)
+    private bool ShowWorkspace(FrameworkElement? selected)
     {
         if (JobObjectsWorkspace is null ||
             AppContainerWorkspace is null ||
@@ -70,92 +83,49 @@ public sealed partial class MainWindow : Window, IDisposable
             WespWorkspace is null ||
             WfpWorkspace is null)
         {
-            return;
+            return false;
         }
 
-        JobObjectsWorkspace.Visibility = Visibility.Visible;
-        AppContainerWorkspace.Visibility = Visibility.Collapsed;
-        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
-        WespWorkspace.Visibility = Visibility.Collapsed;
-        WfpWorkspace.Visibility = Visibility.Collapsed;
+        foreach (var workspace in new FrameworkElement[]
+                 { JobObjectsWorkspace, AppContainerWorkspace, ExperimentalSandboxWorkspace, WespWorkspace, WfpWorkspace })
+        {
+            workspace.Visibility = workspace == selected ? Visibility.Visible : Visibility.Collapsed;
+        }
+        return true;
     }
+
+    private void JobObjectsWorkspaceTab_Click(object sender, RoutedEventArgs e) => ShowWorkspace(JobObjectsWorkspace);
 
     private void AppContainerWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null ||
-            AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null ||
-            WfpWorkspace is null)
+        if (ShowWorkspace(AppContainerWorkspace))
         {
-            return;
+            AppContainerWorkspace.PrepareForDisplay();
         }
-
-        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
-        AppContainerWorkspace.Visibility = Visibility.Visible;
-        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
-        WespWorkspace.Visibility = Visibility.Collapsed;
-        WfpWorkspace.Visibility = Visibility.Collapsed;
-        AppContainerWorkspace.PrepareForDisplay();
     }
 
-    private void ExperimentalSandboxWorkspaceTab_Click(
-        object sender,
-        RoutedEventArgs e)
+    private void ExperimentalSandboxWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null ||
-            AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null ||
-            WfpWorkspace is null)
+        if (ShowWorkspace(ExperimentalSandboxWorkspace))
         {
-            return;
+            ExperimentalSandboxWorkspace.PrepareForDisplay();
         }
-
-        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
-        AppContainerWorkspace.Visibility = Visibility.Collapsed;
-        ExperimentalSandboxWorkspace.Visibility = Visibility.Visible;
-        WespWorkspace.Visibility = Visibility.Collapsed;
-        WfpWorkspace.Visibility = Visibility.Collapsed;
-        ExperimentalSandboxWorkspace.PrepareForDisplay();
     }
 
     private void WespWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null ||
-            AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null ||
-            WfpWorkspace is null)
+        if (ShowWorkspace(WespWorkspace))
         {
-            return;
+            WespWorkspace.PrepareForDisplay();
         }
-
-        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
-        AppContainerWorkspace.Visibility = Visibility.Collapsed;
-        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
-        WespWorkspace.Visibility = Visibility.Visible;
-        WfpWorkspace.Visibility = Visibility.Collapsed;
-        WespWorkspace.PrepareForDisplay();
     }
 
     private void WfpWorkspaceTab_Click(object sender, RoutedEventArgs e)
     {
-        if (JobObjectsWorkspace is null ||
-            AppContainerWorkspace is null ||
-            ExperimentalSandboxWorkspace is null ||
-            WespWorkspace is null ||
-            WfpWorkspace is null)
+        if (ShowWorkspace(WfpWorkspace))
         {
-            return;
+            WfpWorkspace.PrepareForDisplay();
         }
-
-        JobObjectsWorkspace.Visibility = Visibility.Collapsed;
-        AppContainerWorkspace.Visibility = Visibility.Collapsed;
-        ExperimentalSandboxWorkspace.Visibility = Visibility.Collapsed;
-        WespWorkspace.Visibility = Visibility.Collapsed;
-        WfpWorkspace.Visibility = Visibility.Visible;
-        WfpWorkspace.PrepareForDisplay();
     }
 
     private async void NewJob_Click(object sender, RoutedEventArgs e)
@@ -198,14 +168,9 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private async void LaunchProcess_Click(object sender, RoutedEventArgs e) => await LaunchInSelectedJobAsync().ConfigureAwait(true);
-
     private async void JobDetails_LaunchRequested(object sender, RoutedEventArgs e) => await LaunchInSelectedJobAsync().ConfigureAwait(true);
 
     private async void AssignRunningProcesses_Click(object sender, RoutedEventArgs e) =>
-        await AssignRunningProcessesAsync().ConfigureAwait(true);
-
-    private async void JobDetails_AssignProcessesRequested(object sender, RoutedEventArgs e) =>
         await AssignRunningProcessesAsync().ConfigureAwait(true);
 
     private async Task LaunchInSelectedJobAsync()
@@ -236,6 +201,14 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void JobTab_CloseRequested(object? sender, InstanceTabCloseRequestedEventArgs e)
+    {
+        if (e.Item is JobViewModel job && _viewModel.Jobs.Contains(job))
+        {
+            CloseJobWithWarning(job);
+        }
+    }
+
     private void CloseJobWithWarning(JobViewModel job)
     {
         if (job.IsBusy)
@@ -250,6 +223,10 @@ public sealed partial class MainWindow : Window, IDisposable
         }
 
         var closeRisks = new List<string>();
+        if (job.IsSnapshotStale)
+        {
+            closeRisks.Add("The current job settings could not be verified. Closing its handle may terminate members or detach notification delivery. Refresh first to inspect the current settings.");
+        }
         if (job.KillOnCloseConfigured)
         {
             closeRisks.Add("KillOnJobClose is configured. If this is the last open handle, Windows may terminate every process in the job.");
@@ -275,7 +252,11 @@ public sealed partial class MainWindow : Window, IDisposable
             }
         }
 
-        _viewModel.CloseJob(job);
+        if (!_viewModel.CloseJob(job))
+        {
+            MessageBox.Show(this, _viewModel.StatusMessage, "Could not close Job Object handle",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private async Task AssignRunningProcessesAsync()
@@ -284,7 +265,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             MessageBox.Show(
                 this,
-                "Choose a target job card before assigning the selected processes.",
+                "Choose a target job tab before assigning the selected processes.",
                 "No job selected",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -419,6 +400,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (JobObjectsWorkspace.Visibility == Visibility.Visible && JobList.HandleWorkspaceKeyDown(e))
+        {
+            return;
+        }
+
         if (JobObjectsWorkspace.Visibility == Visibility.Visible &&
             e.Key == Key.Enter &&
             Keyboard.Modifiers == ModifierKeys.Control)
@@ -428,14 +414,30 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private void Window_Closing(object? sender, CancelEventArgs e)
+    private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (_isClosing)
+        {
+            return;
+        }
+
+        if (_viewModel.HasPendingOperations)
+        {
+            MessageBox.Show(this, "Wait for the current job or process-list operation to finish before closing Shackles.",
+                "Operation in progress", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (AppContainerWorkspace.IsBusy ||
             ExperimentalSandboxWorkspace.IsBusy ||
             WespWorkspace.IsBusy ||
             WfpWorkspace.IsBusy)
         {
-            e.Cancel = true;
             var workspace = AppContainerWorkspace.IsBusy
                 ? "AppContainer"
                 : ExperimentalSandboxWorkspace.IsBusy
@@ -455,7 +457,6 @@ public sealed partial class MainWindow : Window, IDisposable
         var busyJobs = _viewModel.Jobs.Where(job => job.IsBusy).Select(job => job.DisplayName).ToArray();
         if (busyJobs.Length > 0)
         {
-            e.Cancel = true;
             MessageBox.Show(
                 this,
                 $"Wait for the current operation on {string.Join(", ", busyJobs)} to finish before closing Shackles.",
@@ -469,6 +470,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             var killOnCloseJobs = _viewModel.Jobs.Where(job => job.KillOnCloseConfigured).Select(job => job.DisplayName).ToArray();
             var liveNotificationJobs = _viewModel.Jobs.Where(job => job.LiveNotificationOwnerRequiredOnClose).Select(job => job.DisplayName).ToArray();
+            var unverifiedJobs = _viewModel.Jobs.Where(job => job.IsSnapshotStale).Select(job => job.DisplayName).ToArray();
             var appContainerTrackedCount = AppContainerWorkspace.TrackedLaunchCount;
             var canHaveUntrackedDescendants =
                 AppContainerWorkspace.CanHaveUntrackedDescendants;
@@ -480,12 +482,17 @@ public sealed partial class MainWindow : Window, IDisposable
             var wfpHasActivePolicy = WfpWorkspace.HasActivePolicy;
             if (killOnCloseJobs.Length > 0 ||
                 liveNotificationJobs.Length > 0 ||
+                unverifiedJobs.Length > 0 ||
                 appContainerTrackedCount > 0 ||
                 experimentalTrackedCount > 0 ||
                 wespHasActiveSession ||
                 wfpHasActivePolicy)
             {
                 var warnings = new List<string>();
+                if (unverifiedJobs.Length > 0)
+                {
+                    warnings.Add($"Current settings could not be verified for: {string.Join(", ", unverifiedJobs)}. Closing these handles may affect their processes or notification delivery.");
+                }
                 if (killOnCloseJobs.Length > 0)
                 {
                     warnings.Add($"KillOnJobClose may terminate members of: {string.Join(", ", killOnCloseJobs)}.");
@@ -547,7 +554,6 @@ public sealed partial class MainWindow : Window, IDisposable
                     MessageBoxResult.No);
                 if (answer != MessageBoxResult.Yes)
                 {
-                    e.Cancel = true;
                     return;
                 }
             }
@@ -555,7 +561,51 @@ public sealed partial class MainWindow : Window, IDisposable
             _closeConfirmed = true;
         }
 
-        Dispose();
+        _isClosing = true;
+        IsEnabled = false;
+        var previousTitle = Title;
+        Title = "Shackles — Cleaning up…";
+        try
+        {
+            // Empty workspaces can finish cleanup synchronously. Let the original
+            // Closing callback return before cleanup attempts the final Close.
+            await System.Windows.Threading.Dispatcher.Yield();
+
+            var warnings = await WorkspaceCleanupCoordinator.CloseAsync(
+            [
+                ("AppContainer", AppContainerWorkspace.CloseAllAsync),
+                ("Experimental sandboxes", ExperimentalSandboxWorkspace.CloseAllAsync),
+                ("WESP Blocking", WespWorkspace.CloseAllAsync),
+                ("WFP Blocking", WfpWorkspace.CloseAllAsync),
+                ("Job Objects", _viewModel.CloseAllAsync)
+            ]).ConfigureAwait(true);
+
+            if (warnings.Count > 0)
+            {
+                IsEnabled = true;
+                MessageBox.Show(this,
+                    $"Some resources could not be cleaned up:\n\n• {string.Join("\n\n• ", warnings)}\n\nShackles will stay open. Retry cleanup in the workspace or close again to retry.",
+                    "Cleanup needs attention", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _closeConfirmed = false;
+                return;
+            }
+
+            Dispose();
+            Close();
+        }
+        catch (Exception ex)
+        {
+            IsEnabled = true;
+            _closeConfirmed = false;
+            MessageBox.Show(this, $"Cleanup could not finish: {ex.Message}\n\nClose again to retry.",
+                "Cleanup needs attention", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            Title = previousTitle;
+            IsEnabled = true;
+            _isClosing = false;
+        }
     }
 
     public void Dispose()
@@ -565,11 +615,14 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
+        WorkspaceCleanupCoordinator.Dispose(
+        [
+            ("AppContainer", AppContainerWorkspace.Dispose),
+            ("Experimental sandboxes", ExperimentalSandboxWorkspace.Dispose),
+            ("WESP Blocking", WespWorkspace.Dispose),
+            ("WFP Blocking", WfpWorkspace.Dispose),
+            ("Job Objects", _viewModel.Dispose)
+        ]);
         _disposed = true;
-        AppContainerWorkspace.Dispose();
-        ExperimentalSandboxWorkspace.Dispose();
-        WespWorkspace.Dispose();
-        WfpWorkspace.Dispose();
-        _viewModel.Dispose();
     }
 }

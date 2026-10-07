@@ -1,10 +1,12 @@
+using Shackles.ExperimentalSandboxes.Internal;
+
 namespace Shackles.ExperimentalSandboxes.Tests;
 
 [TestClass]
 public sealed class SandboxIntegrationTests
 {
     [TestMethod]
-    [TestCategory("Integration")]
+    [TestCategory("WindowsIntegration")]
     public void LaunchesProcessWhenExperimentalApiIsEnabled()
     {
         using var manager = new ExperimentalSandboxManager();
@@ -16,19 +18,36 @@ public sealed class SandboxIntegrationTests
         var command = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             "cmd.exe");
-        var creation = manager.CreateAndLaunch(
-            new ExperimentalSandboxOptions
-            {
-                DisplayName = "Integration",
-                UseAppContainer = false,
-                NetworkMode = ExperimentalSandboxNetworkMode.Blocked
-            },
-            new ExperimentalSandboxLaunchOptions(command)
-            {
-                Arguments = "/d /c exit 0",
-                IncludeTargetDirectoryReadAccess = false,
-                IncludeWorkingDirectoryWriteAccess = false
-            });
+        ExperimentalSandboxCreationResult creation;
+        try
+        {
+            creation = manager.CreateAndLaunch(
+                new ExperimentalSandboxOptions
+                {
+                    DisplayName = "Integration",
+                    UseAppContainer = false,
+                    NetworkMode = ExperimentalSandboxNetworkMode.Blocked
+                },
+                new ExperimentalSandboxLaunchOptions(command)
+                {
+                    Arguments = "/d /c exit 0",
+                    WorkingDirectory = Path.GetDirectoryName(command),
+                    IncludeTargetDirectoryReadAccess = false,
+                    IncludeWorkingDirectoryWriteAccess = false
+                });
+        }
+        catch (ExperimentalSandboxException exception) when (
+            exception.Operation == ExperimentalSandboxOperation.CreateProcess &&
+            exception.InnerException is null &&
+            exception.NativeErrorCode is { } error &&
+            SandboxSupportProbe.IsUnsupportedError(error))
+        {
+            // Exports or a capability probe can succeed on a build whose create
+            // implementation still rejects this experimental launch contract.
+            Assert.Inconclusive(
+                $"This Windows configuration does not support the experimental sandbox launch: {exception.Message}");
+            return;
+        }
 
         Assert.IsGreaterThan(0, creation.FirstLaunch.ProcessId);
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

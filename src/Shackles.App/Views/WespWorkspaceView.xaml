@@ -3,23 +3,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              MinWidth="952"
              AutomationProperties.Name="WESP Blocking preview workspace">
-    <UserControl.Resources>
-        <Style x:Key="StepTitleStyle"
-               TargetType="TextBlock"
-               BasedOn="{StaticResource SectionTitleStyle}">
-            <Setter Property="FontSize" Value="16" />
-        </Style>
-        <Style x:Key="SummaryLabelStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
-            <Setter Property="Margin" Value="0,0,12,9" />
-        </Style>
-        <Style x:Key="SummaryValueStyle" TargetType="TextBlock">
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Margin" Value="0,0,0,9" />
-        </Style>
-    </UserControl.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -27,7 +10,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Style="{StaticResource CardBorderStyle}" Padding="14,9">
+        <Border Style="{StaticResource CompactWorkspaceHeaderStyle}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -56,18 +39,14 @@
                            TextWrapping="Wrap" />
 
                 <Border Grid.Column="4"
-                        Padding="9,5"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Center"
-                        Background="{DynamicResource MutedPanelBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4">
+                        Style="{StaticResource SupportStatusPanelStyle}">
                     <DockPanel LastChildFill="True">
                         <Button x:Name="RefreshSupportButton"
                                 DockPanel.Dock="Right"
                                 Margin="12,0,0,0"
-                                Padding="10,5"
+                                Style="{StaticResource CompactButtonStyle}"
                                 VerticalAlignment="Center"
                                 Click="RefreshSupport_Click"
                                 Content="Refresh _support" />
@@ -76,14 +55,16 @@
                                        HorizontalAlignment="Right"
                                        FontWeight="SemiBold"
                                        Text="Support not checked" />
-                            <TextBlock x:Name="SupportDetailText"
-                                       MaxWidth="310"
-                                       Margin="0,2,0,0"
-                                       HorizontalAlignment="Right"
-                                       Style="{StaticResource CaptionStyle}"
-                                       Text="Open this workspace or refresh to check WESP on this computer."
-                                       TextAlignment="Right"
-                                       TextWrapping="Wrap" />
+                            <ScrollViewer Style="{StaticResource SupportDetailScrollViewerStyle}">
+                                <TextBlock x:Name="SupportDetailText"
+                                           MaxWidth="310"
+                                           Margin="0,2,0,0"
+                                           HorizontalAlignment="Right"
+                                           Style="{StaticResource CaptionStyle}"
+                                           Text="Open this workspace or refresh to check WESP on this computer."
+                                           TextAlignment="Right"
+                                           TextWrapping="Wrap" />
+                            </ScrollViewer>
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -92,9 +73,9 @@
 
         <Grid x:Name="InteractiveWorkspace" Grid.Row="2">
             <Grid.RowDefinitions>
-                <RowDefinition Height="5*" MinHeight="280" />
+                <RowDefinition Height="5*" MinHeight="220" />
                 <RowDefinition Height="12" />
-                <RowDefinition Height="2*" MinHeight="170" MaxHeight="300" />
+                <RowDefinition Height="2*" MinHeight="100" MaxHeight="300" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="5*" MinWidth="560" />
@@ -103,10 +84,10 @@
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="16,15,16,16">
                         <StackPanel x:Name="PolicyEditorPanel">
-                            <TextBlock Style="{StaticResource StepTitleStyle}" Text="1  Choose what WESP blocks" />
+                            <TextBlock Style="{StaticResource StepTitleStyle}" Text="1. Choose what WESP blocks" />
                             <TextBlock Margin="0,5,0,10"
                                        Style="{StaticResource CaptionStyle}"
                                        Text="Folder and registry rules include the configured path and its descendants. Choose Blocked to deny reads and changes, or Read-only to allow reads while denying changes. Rules are fixed after the session starts."
@@ -139,7 +120,7 @@
                                                      AutomationProperties.Name="Folder path for WESP Blocking" />
                                             <Button Grid.Column="1"
                                                     Margin="7,0,0,0"
-                                                    Padding="9,5"
+                                                    Style="{StaticResource CompactButtonStyle}"
                                                     Click="BrowseFileRuleFolder_Click"
                                                     Content="Browse…" />
                                         </Grid>
@@ -156,7 +137,7 @@
                                             </ComboBox>
                                             <Button Grid.Column="1"
                                                     Margin="7,0,0,0"
-                                                    Padding="9,5"
+                                                    Style="{StaticResource CompactButtonStyle}"
                                                     Click="AddFileRule_Click"
                                                     Content="Add folder" />
                                         </Grid>
@@ -190,7 +171,7 @@
                                                             <ComboBoxItem Content="Read-only" />
                                                         </ComboBox>
                                                         <Button Grid.Column="2"
-                                                                Padding="7,4"
+                                                                Style="{StaticResource RowActionButtonStyle}"
                                                                 Tag="{Binding}"
                                                                 Click="RemoveFileRule_Click"
                                                                 Content="Remove" />
@@ -225,7 +206,7 @@
                                             </ComboBox>
                                             <Button Grid.Column="1"
                                                     Margin="7,0,0,0"
-                                                    Padding="9,5"
+                                                    Style="{StaticResource CompactButtonStyle}"
                                                     Click="AddRegistryRule_Click"
                                                     Content="Add key" />
                                         </Grid>
@@ -259,7 +240,7 @@
                                                             <ComboBoxItem Content="Read-only" />
                                                         </ComboBox>
                                                         <Button Grid.Column="2"
-                                                                Padding="7,4"
+                                                                Style="{StaticResource RowActionButtonStyle}"
                                                                 Tag="{Binding}"
                                                                 Click="RemoveRegistryRule_Click"
                                                                 Content="Remove" />
@@ -288,13 +269,13 @@
                                                      AutomationProperties.Name="Blocked child application executable name" />
                                             <Button Grid.Column="1"
                                                     Margin="7,0,0,0"
-                                                    Padding="9,5"
+                                                    Style="{StaticResource CompactButtonStyle}"
                                                     Click="BrowseBlockedChildExecutable_Click"
                                                     Content="Browse…" />
                                         </Grid>
                                         <Button Margin="0,7,0,0"
                                                 HorizontalAlignment="Right"
-                                                Padding="9,5"
+                                                Style="{StaticResource CompactButtonStyle}"
                                                 Click="AddBlockedChildExecutable_Click"
                                                 Content="Add blocked name" />
                                         <ListBox x:Name="BlockedChildExecutableList"
@@ -320,7 +301,7 @@
                                                         </StackPanel>
                                                         <Button Grid.Column="1"
                                                                 Margin="7,0,0,0"
-                                                                Padding="7,4"
+                                                                Style="{StaticResource RowActionButtonStyle}"
                                                                 Tag="{Binding}"
                                                                 Click="RemoveBlockedChildExecutable_Click"
                                                                 Content="Remove" />
@@ -334,14 +315,14 @@
                         </StackPanel>
 
                         <Separator Margin="0,16,0,14" />
-                        <TextBlock Style="{StaticResource StepTitleStyle}" Text="2  Optional launch settings" />
+                        <TextBlock Style="{StaticResource StepTitleStyle}" Text="2. Optional launch settings" />
                         <TextBlock Margin="0,5,0,10"
                                    Style="{StaticResource CaptionStyle}"
                                    Text="Choose a root application if Shackles should launch processes for this session. Leave it blank to start with running processes only. Once the session starts, the root choice stays fixed."
                                    TextWrapping="Wrap" />
 
                         <StackPanel x:Name="RootExecutablePanel">
-                            <TextBlock Margin="0,0,0,3" Style="{StaticResource FieldLabelStyle}" Text="Root application (optional)" />
+                            <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Root application (optional)" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -352,16 +333,16 @@
                                          AutomationProperties.Name="Root application path" />
                                 <Button Grid.Column="1"
                                         Margin="7,0,0,0"
-                                        Padding="9,5"
+                                        Style="{StaticResource CompactButtonStyle}"
                                         Click="BrowseRootExecutable_Click"
                                         Content="Browse…" />
                             </Grid>
                         </StackPanel>
 
-                        <TextBlock Margin="0,9,0,3" Style="{StaticResource FieldLabelStyle}" Text="Arguments" />
+                        <TextBlock Margin="0,9,0,3" Style="{StaticResource StackedFieldLabelStyle}" Text="Arguments" />
                         <TextBox x:Name="ArgumentsTextBox" AutomationProperties.Name="Process arguments" />
 
-                        <TextBlock Margin="0,9,0,3" Style="{StaticResource FieldLabelStyle}" Text="Working directory" />
+                        <TextBlock Margin="0,9,0,3" Style="{StaticResource StackedFieldLabelStyle}" Text="Working directory" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -372,7 +353,7 @@
                             <Button x:Name="BrowseWorkingDirectoryButton"
                                     Grid.Column="1"
                                     Margin="7,0,0,0"
-                                    Padding="9,5"
+                                    Style="{StaticResource CompactButtonStyle}"
                                     Click="BrowseWorkingDirectory_Click"
                                     Content="Browse…" />
                         </Grid>
@@ -389,7 +370,7 @@
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="16,15,16,10">
                             <DockPanel>
                                 <Border DockPanel.Dock="Right" Style="{StaticResource BadgeStyle}">
@@ -459,7 +440,8 @@
                             <DockPanel>
                                 <Button x:Name="RefreshSessionButton"
                                         DockPanel.Dock="Right"
-                                        Padding="8,4"
+                                        Margin="8,0,0,0"
+                                        Style="{StaticResource CompactButtonStyle}"
                                         Click="RefreshSession_Click"
                                         Content="Refresh" />
                                 <TextBlock VerticalAlignment="Center"
@@ -468,7 +450,7 @@
                             </DockPanel>
                             <Button x:Name="ApplyExistingProcessesButton"
                                     Margin="0,7,0,0"
-                                    Padding="8,5"
+                                    Style="{StaticResource CompactButtonStyle}"
                                     Click="ApplyExistingProcesses_Click"
                                     Content="_Use running processes…"
                                     ToolTip="Start WESP Blocking with one or more processes that are already running"
@@ -482,12 +464,9 @@
 
                             <Border x:Name="WorkspaceNotice"
                                     Margin="0,14,0,0"
-                                    Padding="9"
-                                    Background="{DynamicResource MutedPanelBrush}"
-                                    BorderBrush="{DynamicResource BorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="6">
+                                    Style="{StaticResource NoticeBorderStyle}">
                                 <TextBlock x:Name="WorkspaceNoticeText"
+                                           Foreground="{DynamicResource TextBrush}"
                                            Text="Add only the blocking rules you need, then launch an application or choose running processes."
                                            TextWrapping="Wrap" />
                             </Border>
@@ -506,11 +485,13 @@
                                 Content="_Start WESP Blocking and launch" />
                         <Button x:Name="CloseSessionButton"
                                 Margin="0,7,0,0"
+                                Style="{StaticResource ActionButtonStyle}"
                                 Click="CloseSession_Click"
                                 Content="_Close blocking session"
                                 Visibility="Collapsed" />
                         <Button x:Name="ResetDraftButton"
                                 Margin="0,7,0,0"
+                                Style="{StaticResource ActionButtonStyle}"
                                 Click="ResetDraft_Click"
                                 Content="_Reset draft" />
                         <TextBlock Margin="0,7,0,0"
@@ -572,7 +553,7 @@
                             <Button x:Name="SaveActivityLogButton"
                                     Grid.Column="2"
                                     Margin="14,0,0,0"
-                                    Padding="10,5"
+                                    Style="{StaticResource CompactButtonStyle}"
                                     VerticalAlignment="Center"
                                     Click="SaveActivityLog_Click"
                                     Content="_Save logs…"
@@ -659,7 +640,8 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <TextBlock Margin="18,12"
+                        <TextBlock x:Name="EmptySessionActivityText"
+                                   Margin="18,4"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
                                    IsHitTestVisible="False"
@@ -688,18 +670,9 @@
               Grid.Row="2"
               Visibility="Collapsed"
               AutomationProperties.Name="Administrator access required for WESP Blocking">
-            <Border Background="{DynamicResource MutedPanelBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8" />
+            <Border Style="{StaticResource OptionCardStyle}" Padding="0" />
 
-            <Border MaxWidth="620"
-                    MinWidth="480"
-                    Margin="32"
-                    Padding="0"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource CardBorderStyle}">
+            <Border Style="{StaticResource AdministratorPromptCardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="6" />
@@ -716,17 +689,12 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Border Width="58"
-                                Height="58"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Top"
-                                Background="{DynamicResource AccentBrush}"
-                                CornerRadius="29">
+                        <Border Style="{StaticResource AdministratorPromptIconStyle}">
                             <Viewbox Width="28"
                                      Height="31"
                                      HorizontalAlignment="Center"
                                      VerticalAlignment="Center">
-                                <Path Data="M 12,1 L 22,5 L 22,12 C 22,19 17.7,24.4 12,27 C 6.3,24.4 2,19 2,12 L 2,5 Z M 12,8 L 12,15 M 12,19 L 12,20"
+                                <Path Data="{StaticResource AdministratorShieldGeometry}"
                                       Fill="Transparent"
                                       Stroke="{DynamicResource AccentTextBrush}"
                                       StrokeEndLineCap="Round"
@@ -737,13 +705,11 @@
                         </Border>
 
                         <StackPanel Grid.Column="2">
-                            <TextBlock FontSize="22"
-                                       FontWeight="SemiBold"
+                            <TextBlock Style="{StaticResource AdministratorPromptTitleStyle}"
                                        Text="Administrator access required" />
                             <TextBlock Margin="0,8,0,0"
-                                       FontSize="14"
-                                       Text="WESP accepts client connections only from a high-integrity process. This workspace is locked so you do not spend time configuring a session that cannot start."
-                                       TextWrapping="Wrap" />
+                                       Style="{StaticResource AdministratorPromptBodyStyle}"
+                                       Text="WESP accepts client connections only from a high-integrity process. This workspace is locked so you do not spend time configuring a session that cannot start." />
                             <TextBlock Margin="0,9,0,0"
                                        Style="{StaticResource CaptionStyle}"
                                        Text="Open an administrator copy directly on WESP Blocking. This Shackles window stays open, along with any work in the other workspaces."
@@ -760,6 +726,7 @@
                             <TextBlock x:Name="ElevationLaunchStatusText"
                                        Margin="0,10,0,0"
                                        Style="{StaticResource CaptionStyle}"
+                                       Foreground="{DynamicResource TextBrush}"
                                        TextWrapping="Wrap"
                                        Visibility="Collapsed"
                                        AutomationProperties.LiveSetting="Polite" />

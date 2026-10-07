@@ -63,25 +63,71 @@ Prerequisites:
 ```powershell
 .\build.ps1
 .\build.ps1 -Configuration Release
+.\build.ps1 all # Build both Debug and Release
 dotnet run --project src\Shackles.App\Shackles.App.csproj
 ```
 
-Run the tests with:
+Build and run the tests with:
 
 ```powershell
-dotnet test Shackles.slnx -c Release
+.\build.ps1 -tests # Debug (the default)
+.\build.ps1 Release -tests
+.\build.ps1 all -tests # Build and test both configurations
 ```
 
-Create the normal x64 build, which uses the separately installed .NET 10 Desktop Runtime, with:
+`-tests` (also `-Test`) runs the automated suite using the completed builds.
+It includes unit tests, offscreen WPF component tests, and Windows integration
+tests that exercise native APIs and child processes. Tests for unavailable
+Windows features are reported as skipped. With `all`, both test runs finish
+even if one fails, and any test failure makes the script fail.
+
+The visible editor smoke test is opt-in:
 
 ```powershell
-dotnet publish src\Shackles.App\Shackles.App.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained false `
-  -p:PublishSingleFile=true `
-  -o artifacts\Shackles-win-x64-framework-dependent
+.\build.ps1 Release -InteractiveTests # Includes the automated suite and visible UI test
 ```
+
+Or run the tests directly with:
+
+```powershell
+dotnet test Shackles.slnx -c Release --filter "TestCategory!=Interactive"
+```
+
+Run only native Windows integration tests with:
+
+```powershell
+dotnet test Shackles.slnx -c Release --filter "TestCategory=WindowsIntegration&TestCategory!=Interactive"
+```
+
+Run the tests outside the Windows integration and interactive categories with:
+
+```powershell
+dotnet test Shackles.slnx -c Release --filter "TestCategory!=WindowsIntegration&TestCategory!=Interactive"
+```
+
+This last selection still includes offscreen component and client-library tests;
+the whole test suite is broader than pure unit tests.
+
+The app regression tests cover delayed operations, failed read-back after a successful
+action, draft preservation, numeric precision, and field-specific validation. Cleanup
+tests use injected failures to check retry and ownership without changing real policy.
+
+Create the normal x64 single-file package, which uses the separately installed
+.NET 10 Desktop Runtime, with:
+
+```powershell
+.\build.ps1 -Publish
+```
+
+`-Publish` defaults to Release. The package is written to
+`artifacts\publish\win-x64\Release` and contains `Shackles.exe` plus
+`espclient.dll`. Keep both files together; the DLL stays separate so it can be
+replaced independently. Application libraries and debug symbols are bundled into
+the executable, while the .NET runtime is not included.
+
+Use `.\build.ps1 Debug -Publish` for a Debug package or
+`.\build.ps1 All -Publish` for both configurations. Each configuration has its own
+folder under `artifacts\publish\win-x64`.
 
 Create a self-contained x64 build with:
 
@@ -251,14 +297,14 @@ without relying on a friendly filename.
 
 ## App Containers workspace
 
-Each card creates a unique profile and SID on its first successful launch and reuses that identity later. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and explicit file or registry grants.
+Each sandbox creates a unique profile and SID on its first successful launch and reuses that identity later. The workspace supports AppContainer or LPAC isolation, child and environment policy, network and resource capabilities, `enterpriseAuthentication`, named capabilities, and explicit file or registry grants.
 
 File access has two explicit backends:
 
 - **Host ACL grants** add a temporary allow ACE for the sandbox SID.
 - **Brokered File System (BFS)** asks Windows to broker selected paths without changing their ACLs.
 
-Registry grants always use temporary ACL entries. Drafts do not change host state. Shackles journals cleanup intent before applying ACL or BFS policy, releases resource policy when the final directly tracked process exits, and reapplies it for a later launch. Closing the card or app also terminates directly tracked processes and deletes the generated profile. Incomplete cleanup is reported and retried on the next run.
+Registry grants always use temporary ACL entries. Drafts do not change host state. Shackles journals cleanup intent before applying ACL or BFS policy, releases resource policy when the final directly tracked process exits, and reapplies it for a later launch. Closing the tab or app also terminates directly tracked processes and deletes the generated profile. Incomplete cleanup keeps a **CLEANUP NEEDED** tab with **Retry cleanup**; the next run also attempts journal recovery. Support checks and recovery start in the background when the workspace first opens.
 
 ### Brokered File System (experimental)
 

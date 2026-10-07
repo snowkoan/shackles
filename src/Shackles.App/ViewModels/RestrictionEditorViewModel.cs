@@ -12,6 +12,8 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     private readonly bool _canPostEndOfJobNotification;
     private bool _isDirty;
     private string _validationMessage = string.Empty;
+    private string? _validationPropertyName;
+    private JobEndAction _loadedEndAction;
     private LoadedTextValue<TimeSpan> _loadedPerProcessTime;
     private LoadedTextValue<TimeSpan> _loadedPerJobTime;
     private LoadedTextValue<ulong> _loadedMinimumWorkingSet;
@@ -96,21 +98,27 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     private JobEndAction _endAction = JobEndAction.TerminateAtEndOfJob;
 
     public event EventHandler? DraftChanged;
+    public event EventHandler? ValidationFailed;
 
     public IReadOnlyList<ProcessPriorityChoice> PriorityChoices { get; } = Enum.GetValues<ProcessPriorityChoice>();
-    public IReadOnlyList<CpuControlMode> CpuModes { get; } = Enum.GetValues<CpuControlMode>();
+    public IReadOnlyList<EditorChoice<CpuControlMode>> CpuModeChoices { get; } =
+    [
+        new(CpuControlMode.Disabled, "Disabled", "No CPU rate control is configured."),
+        new(CpuControlMode.Rate, "Scheduling rate", "A scheduling allocation whose effect depends on system load."),
+        new(CpuControlMode.HardCap, "Hard cap", "An enforced ceiling on the job's CPU use."),
+        new(CpuControlMode.Weight, "Scheduling weight", "Relative scheduling priority from 1 (lowest) to 9 (highest)."),
+        new(CpuControlMode.MinimumMaximum, "Minimum and maximum", "A range of CPU scheduling allocations.")
+    ];
     public IReadOnlyList<RateTolerance> ToleranceChoices { get; } = Enum.GetValues<RateTolerance>();
     public IReadOnlyList<RateToleranceInterval> ToleranceIntervalChoices { get; } = Enum.GetValues<RateToleranceInterval>();
     public IReadOnlyList<NetworkBandwidthUnit> NetworkBandwidthUnits { get; } = NetworkBandwidthUnit.All;
     public RestrictionEditorViewModel(bool canPostEndOfJobNotification)
     {
         _canPostEndOfJobNotification = canPostEndOfJobNotification;
-        EndActionChoices = canPostEndOfJobNotification
-            ? Enum.GetValues<JobEndAction>()
-            : [JobEndAction.TerminateAtEndOfJob];
+        UpdateEndActionChoices();
     }
 
-    public IReadOnlyList<JobEndAction> EndActionChoices { get; private set; }
+    public IReadOnlyList<EditorChoice<JobEndAction>> EndActionChoices { get; private set; } = [];
 
     public bool IsDirty
     {
@@ -131,6 +139,11 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     }
 
     public bool HasValidationMessage => !string.IsNullOrWhiteSpace(ValidationMessage);
+    public string? ValidationPropertyName
+    {
+        get => _validationPropertyName;
+        private set => SetProperty(ref _validationPropertyName, value);
+    }
 
     public bool KillOnJobClose { get => _killOnJobClose; set => SetDraft(ref _killOnJobClose, value); }
     public bool BreakawayAllowed { get => _breakawayAllowed; set => SetDraft(ref _breakawayAllowed, value); }
@@ -157,8 +170,21 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     public bool SchedulingClassEnabled { get => _schedulingClassEnabled; set => SetDraft(ref _schedulingClassEnabled, value); }
     public string SchedulingClass { get => _schedulingClass; set => SetDraft(ref _schedulingClass, value); }
 
-    public CpuControlMode CpuMode { get => _cpuMode; set { if (SetDraft(ref _cpuMode, value)) OnPropertyChanged(nameof(IsCpuEnabled)); } }
-    public bool IsCpuEnabled => CpuMode != CpuControlMode.Disabled;
+    public CpuControlMode CpuMode
+    {
+        get => _cpuMode;
+        set
+        {
+            if (SetDraft(ref _cpuMode, value))
+            {
+                NotifyCpuInputStateChanged();
+            }
+        }
+    }
+    public bool IsCpuRateInputEnabled => CanEditCpu && CpuMode is CpuControlMode.Rate or CpuControlMode.HardCap;
+    public bool IsCpuWeightInputEnabled => CanEditCpu && CpuMode == CpuControlMode.Weight;
+    public bool IsCpuMinimumMaximumInputEnabled => CanEditCpu && CpuMode == CpuControlMode.MinimumMaximum;
+    public bool IsCpuNotifyInputEnabled => CanEditCpu && CpuMode != CpuControlMode.Disabled;
     public string CpuRatePercent { get => _cpuRatePercent; set => SetDraft(ref _cpuRatePercent, value); }
     public string CpuWeight { get => _cpuWeight; set => SetDraft(ref _cpuWeight, value); }
     public string CpuMinimumPercent { get => _cpuMinimumPercent; set => SetDraft(ref _cpuMinimumPercent, value); }
@@ -172,6 +198,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             if (SetProperty(ref _usesUnsupportedPerProcessorCaps, value))
             {
                 OnPropertyChanged(nameof(CanEditCpu));
+                NotifyCpuInputStateChanged();
             }
         }
     }
@@ -217,7 +244,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             // Keep the canonical rate when decimal precision cannot express every fractional digit
             // in the selected unit; re-parsing the display could change native byte rounding.
             _canonicalNetworkBandwidthBytes = bytesPerSecond;
-            _networkBandwidthValue = FormatNetworkBandwidth(bytesPerSecond / value.BytesPerUnit);
+            _networkBandwidthValue = FormatDecimal(bytesPerSecond / value.BytesPerUnit);
             SetProperty(ref _networkBandwidthUnit, value);
             OnPropertyChanged(nameof(NetworkBandwidthValue));
             OnPropertyChanged(nameof(CanChangeNetworkBandwidthUnit));
@@ -232,8 +259,8 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         "1 kB = 1,000 bytes; 1 MB = 1,000,000 bytes. Rates are rounded to whole B/s (minimum 1 B/s).";
 
     private string NetworkBandwidthValidationMessage =>
-        $"Maximum upload speed must be a number from {FormatNetworkBandwidth(1m / NetworkBandwidthUnit.BytesPerUnit)} " +
-        $"to {FormatNetworkBandwidth(ulong.MaxValue / NetworkBandwidthUnit.BytesPerUnit)} {NetworkBandwidthUnit.Symbol} " +
+        $"Maximum upload speed must be a number from {FormatDecimal(1m / NetworkBandwidthUnit.BytesPerUnit)} " +
+        $"to {FormatDecimal(ulong.MaxValue / NetworkBandwidthUnit.BytesPerUnit)} {NetworkBandwidthUnit.Symbol} " +
         "(1 to 18,446,744,073,709,551,615 B/s). Fractional values are allowed.";
     public bool DscpEnabled { get => _dscpEnabled; set => SetDraft(ref _dscpEnabled, value); }
     public string DscpTag { get => _dscpTag; set => SetDraft(ref _dscpTag, value); }
@@ -313,7 +340,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
                 profile.Network.MaximumBandwidthMegabitsPerSecond.HasValue;
             if (profile.Network.ExactMaximumBandwidthBytesPerSecond is { } exactBandwidth)
             {
-                NetworkBandwidthValue = FormatNetworkBandwidth(exactBandwidth / NetworkBandwidthUnit.BytesPerUnit);
+                NetworkBandwidthValue = FormatDecimal(exactBandwidth / NetworkBandwidthUnit.BytesPerUnit);
             }
             else if (profile.Network.MaximumBandwidthMegabitsPerSecond is { } bandwidth)
             {
@@ -323,7 +350,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             }
             else
             {
-                NetworkBandwidthValue = FormatNetworkBandwidth(1_250_000m / NetworkBandwidthUnit.BytesPerUnit);
+                NetworkBandwidthValue = FormatDecimal(1_250_000m / NetworkBandwidthUnit.BytesPerUnit);
             }
             DscpEnabled = profile.Network.DscpTag.HasValue;
             DscpTag = Format(profile.Network.DscpTag, "0");
@@ -359,12 +386,9 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             NetworkToleranceInterval = notification.NetworkToleranceInterval;
 
             ProcessorGroups = string.Join(", ", profile.ProcessorGroups.Select(item => $"{item.Group}:0x{item.Mask:X}"));
+            _loadedEndAction = profile.EndAction;
+            UpdateEndActionChoices();
             EndAction = profile.EndAction;
-            if (!_canPostEndOfJobNotification && profile.EndAction == JobEndAction.PostNotification)
-            {
-                EndActionChoices = Enum.GetValues<JobEndAction>();
-                OnPropertyChanged(nameof(EndActionChoices));
-            }
 
             _loadedPerProcessTime = new(PerProcessTimeSeconds, hard.PerProcessUserTimeLimit, PerProcessTimeEnabled);
             _loadedPerJobTime = new(PerJobTimeSeconds, hard.PerJobUserTimeLimit, PerJobTimeEnabled);
@@ -378,6 +402,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             _loadedNotifyIoRead = new(NotifyIoReadMb, notification.IoReadBytes, NotifyIoReadEnabled);
             _loadedNotifyIoWrite = new(NotifyIoWriteMb, notification.IoWriteBytes, NotifyIoWriteEnabled);
             ValidationMessage = string.Empty;
+            ValidationPropertyName = null;
             IsDirty = false;
         }
         finally
@@ -400,17 +425,18 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
                 : null;
             if (minimumWorkingSet > maximumWorkingSet)
             {
-                throw new ValidationException("Minimum working set cannot exceed maximum working set.");
+                throw new ValidationException("Minimum working set cannot exceed maximum working set.", nameof(MinimumWorkingSetMb));
             }
 
             if (SubsetAffinityAllowed && !AffinityEnabled)
             {
-                throw new ValidationException("Subset affinity can only be enabled when a job affinity mask is configured.");
+                throw new ValidationException("Enable and enter a job affinity mask before allowing subset affinity.", nameof(AffinityMask));
             }
 
-            if (EndAction == JobEndAction.PostNotification && !_canPostEndOfJobNotification)
+            if (EndAction == JobEndAction.PostNotification && !_canPostEndOfJobNotification &&
+                _loadedEndAction != JobEndAction.PostNotification)
             {
-                throw new ValidationException("PostNotification requires an owned live completion port. Choose TerminateAtEndOfJob or create a new job in Shackles.");
+                throw new ValidationException("Sending a time-limit notification requires a live notification port owned by this Shackles handle. Choose termination or create a new job in Shackles.", nameof(EndAction));
             }
 
             var hard = new HardLimitSettings(
@@ -460,9 +486,9 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             if (RestrictIme) ui |= UiRestrictionFlags.Ime;
             if (RestrictInjection) ui |= UiRestrictionFlags.Injection;
 
-            ValidateTolerancePair(CpuTolerance, CpuToleranceInterval, "CPU");
-            ValidateTolerancePair(IoTolerance, IoToleranceInterval, "I/O");
-            ValidateTolerancePair(NetworkTolerance, NetworkToleranceInterval, "Network");
+            ValidateTolerancePair(CpuTolerance, CpuToleranceInterval, "CPU", nameof(CpuTolerance));
+            ValidateTolerancePair(IoTolerance, IoToleranceInterval, "I/O", nameof(IoTolerance));
+            ValidateTolerancePair(NetworkTolerance, NetworkToleranceInterval, "Network", nameof(NetworkTolerance));
 
             var notifications = new NotificationSettings(
                 NotifyJobTimeEnabled
@@ -489,16 +515,21 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
 
             profile = new RestrictionProfile(hard, cpu, network, ui, notifications, ParseGroups(ProcessorGroups), EndAction);
             ValidationMessage = string.Empty;
+            ValidationPropertyName = null;
             return true;
         }
         catch (ValidationException ex)
         {
             ValidationMessage = ex.Message;
+            ValidationPropertyName = ex.PropertyName;
+            ValidationFailed?.Invoke(this, EventArgs.Empty);
             return false;
         }
         catch (OverflowException)
         {
             ValidationMessage = "One or more values are too large for the Windows job API.";
+            ValidationPropertyName = null;
+            ValidationFailed?.Invoke(this, EventArgs.Empty);
             return false;
         }
     }
@@ -528,7 +559,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
                 Weight: ParseUInt(CpuWeight, "CPU weight", 1, 9),
                 Notify: CpuNotify),
             CpuControlMode.MinimumMaximum => BuildCpuMinimumMaximum(),
-            _ => throw new ValidationException("Select a valid CPU control mode.")
+            _ => throw new ValidationException("Select a valid CPU control mode.", nameof(CpuMode))
         };
     }
 
@@ -538,7 +569,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         var maximum = ParseDouble(CpuMaximumPercent, "Maximum CPU rate", 0.01, 100);
         if (minimum > maximum)
         {
-            throw new ValidationException("Minimum CPU rate cannot exceed maximum CPU rate.");
+            throw new ValidationException("Minimum CPU rate cannot exceed maximum CPU rate.", nameof(CpuMinimumPercent));
         }
 
         return new CpuControlSettings(CpuMode, MinimumPercent: minimum, MaximumPercent: maximum, Notify: CpuNotify);
@@ -555,6 +586,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         {
             IsDirty = true;
             ValidationMessage = string.Empty;
+            ValidationPropertyName = null;
             DraftChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -565,12 +597,12 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         value?.ToString(null, CultureInfo.CurrentCulture) ?? fallback;
 
     private static string FormatSeconds(TimeSpan? value, string fallback) =>
-        value?.TotalSeconds.ToString("0.###", CultureInfo.CurrentCulture) ?? fallback;
+        value.HasValue ? FormatDecimal(value.Value.Ticks / (decimal)TimeSpan.TicksPerSecond) : fallback;
 
     private static string FormatMebibytes(ulong? value, string fallback) =>
-        value.HasValue ? (value.Value / 1024d / 1024d).ToString("0.###", CultureInfo.CurrentCulture) : fallback;
+        value.HasValue ? FormatDecimal(value.Value / 1_048_576m) : fallback;
 
-    private static string FormatNetworkBandwidth(decimal value) =>
+    private static string FormatDecimal(decimal value) =>
         value.ToString("0.############################", CultureInfo.CurrentCulture);
 
     private bool TryGetNetworkBandwidthBytes(out decimal bytesPerSecond)
@@ -597,7 +629,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
     {
         if (!TryGetNetworkBandwidthBytes(out var bytesPerSecond))
         {
-            throw new ValidationException(NetworkBandwidthValidationMessage);
+            throw new ValidationException(NetworkBandwidthValidationMessage, nameof(NetworkBandwidthValue));
         }
 
         return checked((ulong)decimal.Round(bytesPerSecond, 0, MidpointRounding.AwayFromZero));
@@ -614,40 +646,78 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         LoadedTextValue<T> loaded) where T : struct =>
         loaded.WasEnabled && string.Equals(currentText, loaded.Text, StringComparison.Ordinal);
 
-    private static uint ParseUInt(string value, string label, uint minimum, uint maximum)
+    private static uint ParseUInt(string value, string label, uint minimum, uint maximum,
+        [CallerArgumentExpression(nameof(value))] string? propertyName = null)
     {
         if (!uint.TryParse(value, NumberStyles.Integer, CultureInfo.CurrentCulture, out var result) || result < minimum || result > maximum)
         {
-            throw new ValidationException($"{label} must be a whole number from {minimum:N0} to {maximum:N0}.");
+            throw new ValidationException($"{label} must be a whole number from {minimum:N0} to {maximum:N0}.", propertyName);
         }
 
         return result;
     }
 
-    private static double ParseDouble(string value, string label, double minimum, double maximum)
+    private static double ParseDouble(string value, string label, double minimum, double maximum,
+        [CallerArgumentExpression(nameof(value))] string? propertyName = null)
     {
         if (!double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out var result) ||
             double.IsNaN(result) || double.IsInfinity(result) || result < minimum || result > maximum)
         {
-            throw new ValidationException($"{label} must be a number from {minimum:N2} to {maximum:N2}.");
+            throw new ValidationException($"{label} must be a number from {minimum.ToString(CultureInfo.CurrentCulture)} to {maximum.ToString(CultureInfo.CurrentCulture)} percent.", propertyName);
         }
 
         return result;
     }
 
-    private static TimeSpan ParseSeconds(string value, string label)
+    private static TimeSpan ParseSeconds(string value, string label,
+        [CallerArgumentExpression(nameof(value))] string? propertyName = null)
     {
-        var seconds = ParseDouble(value, label, 0.001, TimeSpan.MaxValue.TotalSeconds);
-        return TimeSpan.FromSeconds(seconds);
+        var minimum = 1m / TimeSpan.TicksPerSecond;
+        var maximum = long.MaxValue / (decimal)TimeSpan.TicksPerSecond;
+        if (!decimal.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out var seconds))
+        {
+            throw new ValidationException($"{label} must be a positive number in seconds.", propertyName);
+        }
+
+        if (seconds < minimum)
+        {
+            throw new ValidationException($"{label} must be at least 100 nanoseconds ({FormatDecimal(minimum)} seconds).", propertyName);
+        }
+
+        if (seconds > maximum)
+        {
+            throw new ValidationException($"{label} cannot exceed {maximum.ToString("#,0.#######", CultureInfo.CurrentCulture)} seconds.", propertyName);
+        }
+
+        return TimeSpan.FromTicks(checked((long)decimal.Round(seconds * TimeSpan.TicksPerSecond, 0, MidpointRounding.AwayFromZero)));
     }
 
-    private static ulong ParseMebibytes(string value, string label)
+    private static ulong ParseMebibytes(string value, string label,
+        [CallerArgumentExpression(nameof(value))] string? propertyName = null)
     {
-        var mebibytes = ParseDouble(value, label, 0.000001, ulong.MaxValue / 1024d / 1024d);
-        return checked((ulong)Math.Round(mebibytes * 1024d * 1024d, MidpointRounding.AwayFromZero));
+        const decimal bytesPerMebibyte = 1_048_576m;
+        var minimum = 1m / bytesPerMebibyte;
+        var maximum = ulong.MaxValue / bytesPerMebibyte;
+        if (!decimal.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out var mebibytes))
+        {
+            throw new ValidationException($"{label} must be a positive number in MiB.", propertyName);
+        }
+
+        if (mebibytes < minimum)
+        {
+            throw new ValidationException($"{label} must be at least 1 byte; enter the value in MiB.", propertyName);
+        }
+
+        if (mebibytes > maximum)
+        {
+            throw new ValidationException($"{label} cannot exceed {ulong.MaxValue:N0} bytes; enter the value in MiB.", propertyName);
+        }
+
+        return checked((ulong)decimal.Round(mebibytes * bytesPerMebibyte, 0, MidpointRounding.AwayFromZero));
     }
 
-    private static ulong ParseAffinity(string value)
+    private static ulong ParseAffinity(string value,
+        [CallerArgumentExpression(nameof(value))] string? propertyName = null)
     {
         var text = value.Trim();
         var style = NumberStyles.Integer;
@@ -659,7 +729,7 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
 
         if (!ulong.TryParse(text, style, CultureInfo.InvariantCulture, out var mask) || mask == 0)
         {
-            throw new ValidationException("Affinity mask must be a non-zero decimal value or hexadecimal value beginning with 0x.");
+            throw new ValidationException("Affinity mask must be a non-zero decimal value or hexadecimal value beginning with 0x.", propertyName);
         }
 
         return mask;
@@ -678,24 +748,24 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
             var parts = token.Split(':', 2, StringSplitOptions.TrimEntries);
             if (parts.Length != 2 || !ushort.TryParse(parts[0], NumberStyles.Integer, CultureInfo.CurrentCulture, out var group))
             {
-                throw new ValidationException($"Processor affinity '{token}' must use group:mask format, for example 0:0xFF.");
+                throw new ValidationException($"Processor affinity '{token}' must use group:mask format, for example 0:0xFF.", nameof(ProcessorGroups));
             }
 
-            var mask = ParseAffinity(parts[1]);
+            var mask = ParseAffinity(parts[1], nameof(ProcessorGroups));
             if (!groups.TryAdd(group, mask))
             {
-                throw new ValidationException($"Processor group {group} is listed more than once.");
+                throw new ValidationException($"Processor group {group} is listed more than once.", nameof(ProcessorGroups));
             }
         }
 
         return groups.Select(item => new ProcessorGroupAffinity(item.Key, item.Value)).ToArray();
     }
 
-    private static void ValidateTolerancePair(RateTolerance tolerance, RateToleranceInterval interval, string label)
+    private static void ValidateTolerancePair(RateTolerance tolerance, RateToleranceInterval interval, string label, string propertyName)
     {
         if ((tolerance == RateTolerance.None) != (interval == RateToleranceInterval.None))
         {
-            throw new ValidationException($"{label} tolerance and interval must either both be set or both be None.");
+            throw new ValidationException($"{label} tolerance and interval must either both be set or both be None.", propertyName);
         }
     }
 
@@ -704,5 +774,35 @@ internal sealed class RestrictionEditorViewModel : ObservableObject
         T? Value,
         bool WasEnabled) where T : struct;
 
-    private sealed class ValidationException(string message) : Exception(message);
+    private void NotifyCpuInputStateChanged()
+    {
+        OnPropertyChanged(nameof(IsCpuRateInputEnabled));
+        OnPropertyChanged(nameof(IsCpuWeightInputEnabled));
+        OnPropertyChanged(nameof(IsCpuMinimumMaximumInputEnabled));
+        OnPropertyChanged(nameof(IsCpuNotifyInputEnabled));
+    }
+
+    private void UpdateEndActionChoices()
+    {
+        var choices = new List<EditorChoice<JobEndAction>>
+        {
+            new(JobEndAction.TerminateAtEndOfJob, "Terminate at time limit", "Terminate the job's processes when the per-job user-time limit is reached.")
+        };
+        if (_canPostEndOfJobNotification || _loadedEndAction == JobEndAction.PostNotification)
+        {
+            choices.Add(new(JobEndAction.PostNotification,
+                _canPostEndOfJobNotification ? "Send time-limit notification" : "Keep existing notification action",
+                _canPostEndOfJobNotification
+                    ? "Notify the live completion port owned by this Shackles handle."
+                    : "Preserve the job's existing notification action. This opened handle does not own its notification port."));
+        }
+
+        EndActionChoices = choices;
+        OnPropertyChanged(nameof(EndActionChoices));
+    }
+
+    private sealed class ValidationException(string message, string? propertyName = null) : Exception(message)
+    {
+        public string? PropertyName { get; } = propertyName;
+    }
 }

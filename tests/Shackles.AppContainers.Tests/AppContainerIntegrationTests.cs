@@ -27,6 +27,7 @@ public sealed class AppContainerIntegrationTests
             var launchOptions = new AppContainerLaunchOptions(GetCommandPromptPath())
             {
                 Arguments = "/d /c exit 0",
+                WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                 IncludeTargetDirectoryGrant = false
             };
 
@@ -76,6 +77,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c exit 0",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
 
@@ -112,6 +114,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c exit 0",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
 
@@ -158,6 +161,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c exit 0",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
 
@@ -226,6 +230,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c exit 0",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
             Assert.IsTrue(
@@ -250,6 +255,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c exit 0",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
             Assert.IsGreaterThan(0, secondLaunch.ProcessId);
@@ -309,6 +315,7 @@ public sealed class AppContainerIntegrationTests
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
                     Arguments = "/d /c choice /c y /d y /t 1 >nul",
+                    WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
 
@@ -366,6 +373,7 @@ public sealed class AppContainerIntegrationTests
     }
 
     [TestMethod]
+    [TestCategory("Interactive")]
     [Timeout(30000)]
     public void InboxEditStandardLaunchAvoidsLoaderInitializationFailure()
     {
@@ -388,6 +396,7 @@ public sealed class AppContainerIntegrationTests
                 },
                 new AppContainerLaunchOptions(editPath)
                 {
+                    WorkingDirectory = Path.GetDirectoryName(editPath),
                     IncludeTargetDirectoryGrant = false
                 });
 

@@ -99,7 +99,4 @@ internal static partial class NativeMethods
 
     [LibraryImport(Kernel32, SetLastError = true)]
     internal static partial ushort GetActiveProcessorGroupCount();
-
-    [LibraryImport(Kernel32, SetLastError = true)]
-    internal static partial uint GetActiveProcessorCount(ushort groupNumber);
 }

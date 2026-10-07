@@ -115,6 +115,7 @@ public sealed class AppContainerManager : IDisposable
         {
             if (sandbox is not null)
             {
+                TrackSandbox(sandbox);
                 var cleanup = sandbox.Close();
                 if (!cleanup.Completed)
                 {
@@ -146,26 +147,47 @@ public sealed class AppContainerManager : IDisposable
 
     public void Dispose()
     {
+        lock (_gate)
+        {
+            _disposed = true;
+        }
+
+        _ = CloseAll();
+    }
+
+    public IReadOnlyList<AppContainerCleanupResult> CloseAll()
+    {
         AppContainerSandbox[] sandboxes;
         lock (_gate)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
             sandboxes = _sandboxes.ToArray();
-            _sandboxes.Clear();
-            foreach (var sandbox in sandboxes)
+        }
+
+        var results = new List<AppContainerCleanupResult>();
+        foreach (var sandbox in sandboxes)
+        {
+            try
             {
-                sandbox.Changed -= SandboxChanged;
+                results.Add(sandbox.Close());
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                results.Add(new AppContainerCleanupResult(sandbox.DisplayName, false, [exception.Message]));
             }
         }
 
-        foreach (var sandbox in sandboxes)
+        return results;
+    }
+
+    internal void TrackSandbox(AppContainerSandbox sandbox)
+    {
+        lock (_gate)
         {
-            sandbox.Dispose();
+            if (!_sandboxes.Contains(sandbox))
+            {
+                _sandboxes.Add(sandbox);
+                sandbox.Changed += SandboxChanged;
+            }
         }
     }
 
@@ -258,7 +280,7 @@ public sealed class AppContainerManager : IDisposable
         object? sender,
         AppContainerSandboxChangedEventArgs eventArgs)
     {
-        if (!eventArgs.Closed || sender is not AppContainerSandbox sandbox)
+        if (!eventArgs.Closed || sender is not AppContainerSandbox sandbox || !sandbox.CleanupCompleted)
         {
             return;
         }

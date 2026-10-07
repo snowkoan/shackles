@@ -37,13 +37,6 @@ internal static class NativeMethods
         in NativeContextKeyComparison comparison,
         out nint filter);
 
-    [DllImport(WespLibrary, EntryPoint = "EspCreateProcessFilter", ExactSpelling = true, CallingConvention = CallingConvention.Winapi)]
-    internal static extern int EspCreateProcessStringFilter(
-        uint propertyId,
-        EspComparisonType comparisonType,
-        in NativeStringComparison comparison,
-        out nint filter);
-
     [DllImport(WespLibrary, ExactSpelling = true, CallingConvention = CallingConvention.Winapi)]
     internal static extern int EspCreateFileObjectFilter(
         uint propertyId,

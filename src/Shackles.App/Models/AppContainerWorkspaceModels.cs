@@ -1,11 +1,10 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
+using Shackles.App.Infrastructure;
 using Shackles.AppContainers;
 
 namespace Shackles.App.Models;
 
-internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
+internal sealed class AppContainerSandboxCard : ObservableObject
 {
     private AppContainerSnapshot? _snapshot;
 
@@ -15,13 +14,13 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
         Draft.Reset(initialName);
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     internal AppContainerSandboxDraft Draft { get; }
 
     internal AppContainerSandbox? Sandbox { get; private set; }
 
     internal bool IsActive => Sandbox is not null;
+
+    internal bool NeedsCleanup => Sandbox is { IsClosed: true, CleanupCompleted: false };
 
     internal AppContainerSnapshot? Snapshot => _snapshot;
 
@@ -39,7 +38,7 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
         }
     }
 
-    public string StateBadge => IsActive ? "ACTIVE" : "DRAFT";
+    public string StateBadge => NeedsCleanup ? "CLEANUP NEEDED" : IsActive ? "ACTIVE" : "DRAFT";
 
     public string MemberCountText
     {
@@ -77,9 +76,6 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
         }
     }
 
-    public string IdentitySummary =>
-        _snapshot is null ? "SID allocated on first launch" : _snapshot.Sid;
-
     internal void Attach(AppContainerSandbox sandbox)
     {
         Sandbox = sandbox;
@@ -89,10 +85,11 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
     internal void Refresh()
     {
         _snapshot = Sandbox?.GetSnapshot();
-        NotifyAll();
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(StateBadge));
+        OnPropertyChanged(nameof(MemberCountText));
+        OnPropertyChanged(nameof(PolicySummary));
     }
-
-    internal void RefreshDraft() => NotifyAll();
 
     private static bool IsNetworkCapability(string capability) =>
         capability is "internetClient" or
@@ -106,18 +103,6 @@ internal sealed class AppContainerSandboxCard : INotifyPropertyChanged
         capability.Equals(
             "developmentModeNetwork",
             StringComparison.OrdinalIgnoreCase);
-
-    private void NotifyAll()
-    {
-        OnPropertyChanged(nameof(DisplayName));
-        OnPropertyChanged(nameof(StateBadge));
-        OnPropertyChanged(nameof(MemberCountText));
-        OnPropertyChanged(nameof(PolicySummary));
-        OnPropertyChanged(nameof(IdentitySummary));
-    }
-
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
 internal sealed class AppContainerSandboxDraft
@@ -217,7 +202,7 @@ internal sealed class AppContainerFileGrantDraft
     public int AccessIndex { get; set; }
 }
 
-internal sealed class AppContainerRegistryGrantDraft : INotifyPropertyChanged
+internal sealed class AppContainerRegistryGrantDraft : ObservableObject
 {
     private int _accessIndex;
     private int _viewIndex;
@@ -232,38 +217,18 @@ internal sealed class AppContainerRegistryGrantDraft : INotifyPropertyChanged
         _viewIndex = viewIndex;
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     public string Path { get; }
 
     public int AccessIndex
     {
         get => _accessIndex;
-        set
-        {
-            if (_accessIndex == value)
-            {
-                return;
-            }
-
-            _accessIndex = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
-        }
+        set => SetProperty(ref _accessIndex, value, nameof(Summary));
     }
 
     public int ViewIndex
     {
         get => _viewIndex;
-        set
-        {
-            if (_viewIndex == value)
-            {
-                return;
-            }
-
-            _viewIndex = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
-        }
+        set => SetProperty(ref _viewIndex, value, nameof(Summary));
     }
 
     public string Summary =>

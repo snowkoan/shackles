@@ -9,18 +9,20 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Padding="16,13"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="0,0,0,1">
+        <Border x:Name="DetailsHeader" Style="{StaticResource InstanceHeaderStyle}"
+                SizeChanged="DetailsChrome_SizeChanged"
+                BorderThickness="0,0,0,1" CornerRadius="0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <DockPanel>
-                        <TextBlock FontSize="19"
+                    <DockPanel LastChildFill="False">
+                        <TextBlock FontSize="20"
                                    FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding DisplayName}"
                                    Text="{Binding DisplayName}" />
                         <Border Margin="9,0,0,0"
                                 Style="{StaticResource BadgeStyle}"
@@ -34,20 +36,45 @@
                     <TextBlock Margin="0,2,0,0"
                                Style="{StaticResource CaptionStyle}"
                                Text="Apply spans independent Windows information classes and is not atomic; earlier changes can remain if a later class fails." />
+                    <TextBlock Margin="0,5,0,0"
+                               FontWeight="SemiBold"
+                               AutomationProperties.LiveSetting="Polite">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionStyle}">
+                                <Setter Property="Text" Value="Displayed job state may be outdated. Refresh to verify it." />
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSnapshotStale}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding HasSnapshot}" Value="False">
+                                        <Setter Property="Text" Value="Job settings have not been read. Refresh to load them before editing or applying changes." />
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Margin="0,0,8,0" Command="{Binding RefreshCommand}" Content="_Refresh job" />
-                    <Button Margin="0,0,8,0"
+                    <Button Margin="0,0,8,0" Style="{StaticResource CompactButtonStyle}"
+                            Command="{Binding RefreshCommand}" Content="_Refresh job" />
+                    <Button Margin="0,0,8,0" Style="{StaticResource CompactButtonStyle}"
+                            IsEnabled="{Binding CanOperate}"
                             Click="AssignProcessesButton_Click"
                             Content="_Assign running processes…" />
-                    <Button Margin="0,0,8,0" Click="LaunchButton_Click" Content="_Launch…" />
-                    <Button Click="CloseButton_Click" Content="_Close handle" />
+                    <Button Margin="0,0,8,0" Style="{StaticResource PrimaryButtonStyle}" Padding="9,5"
+                            IsEnabled="{Binding CanOperate}" Click="LaunchButton_Click" Content="_Launch…" />
+                    <Button Style="{StaticResource CompactButtonStyle}" IsEnabled="{Binding CanOperate}"
+                            Click="CloseButton_Click" Content="_Close handle" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <TabControl Grid.Row="1"
+        <TabControl x:Name="SettingsTabs" Grid.Row="1"
+                    MinHeight="200"
                     BorderThickness="0"
+                    IsEnabled="{Binding CanEditDraft}"
                     AutomationProperties.Name="Job settings">
             <TabItem Header="Overview">
                 <views:OverviewView />
@@ -72,7 +99,8 @@
             </TabItem>
         </TabControl>
 
-        <Border Grid.Row="2"
+        <Border x:Name="DetailsFooter" Grid.Row="2"
+                SizeChanged="DetailsChrome_SizeChanged"
                 Padding="16,10"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0">
@@ -81,18 +109,26 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Editor.ValidationMessage}"
+                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                    <TextBox Text="{Binding Editor.ValidationMessage, Mode=OneWay}"
+                               IsReadOnly="True" TextWrapping="Wrap" MaxHeight="120"
+                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                               Background="Transparent" BorderThickness="0" Padding="0" MinHeight="0"
                                Foreground="{DynamicResource {x:Static SystemColors.HotTrackBrushKey}}"
                                FontWeight="SemiBold"
+                               AutomationProperties.Name="Restriction validation error"
                                Visibility="{Binding Editor.HasValidationMessage, Converter={StaticResource BooleanToVisibilityConverter}}"
                                AutomationProperties.LiveSetting="Assertive" />
-                    <TextBlock Text="{Binding LastOperationMessage}"
-                               Style="{StaticResource CaptionStyle}"
-                               TextTrimming="CharacterEllipsis" />
+                    <TextBox Text="{Binding LastOperationMessage, Mode=OneWay}"
+                             IsReadOnly="True" TextWrapping="Wrap" MaxHeight="120"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                             Background="Transparent" BorderThickness="0" Padding="0" MinHeight="0"
+                             Foreground="{DynamicResource MutedTextBrush}"
+                             AutomationProperties.Name="Job operation result" />
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button MinWidth="90"
+                            Style="{StaticResource ActionButtonStyle}"
                             Margin="0,0,8,0"
                             Command="{Binding RevertCommand}"
                             Content="_Revert" />

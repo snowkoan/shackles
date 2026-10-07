@@ -3,14 +3,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              MinWidth="952"
              AutomationProperties.Name="Windows Filtering Platform workspace">
-    <UserControl.Resources>
-        <Style x:Key="WfpStepTitleStyle"
-               TargetType="TextBlock"
-               BasedOn="{StaticResource SectionTitleStyle}">
-            <Setter Property="FontSize" Value="16" />
-        </Style>
-    </UserControl.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -18,7 +10,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Style="{StaticResource CardBorderStyle}" Padding="14,9">
+        <Border Style="{StaticResource CompactWorkspaceHeaderStyle}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -45,18 +37,15 @@
                            TextWrapping="Wrap" />
 
                 <Border Grid.Column="4"
-                        Padding="9,5"
+                        Style="{StaticResource SupportStatusPanelStyle}"
                         HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
-                        Background="{DynamicResource MutedPanelBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4">
+                        VerticalAlignment="Center">
                     <DockPanel LastChildFill="True">
                         <Button x:Name="RefreshSupportButton"
                                 DockPanel.Dock="Right"
                                 Margin="12,0,0,0"
-                                Padding="10,5"
+                                Style="{StaticResource CompactButtonStyle}"
+                                VerticalAlignment="Center"
                                 Click="RefreshSupport_Click"
                                 Content="Refresh _support" />
                         <StackPanel VerticalAlignment="Center">
@@ -64,14 +53,16 @@
                                        HorizontalAlignment="Right"
                                        FontWeight="SemiBold"
                                        Text="Support not checked" />
-                            <TextBlock x:Name="SupportDetailText"
-                                       MaxWidth="340"
-                                       Margin="0,2,0,0"
-                                       HorizontalAlignment="Right"
-                                       Style="{StaticResource CaptionStyle}"
-                                       Text="Open this workspace or refresh to check the Base Filtering Engine."
-                                       TextAlignment="Right"
-                                       TextWrapping="Wrap" />
+                            <ScrollViewer Style="{StaticResource SupportDetailScrollViewerStyle}">
+                                <TextBlock x:Name="SupportDetailText"
+                                           MaxWidth="340"
+                                           Margin="0,2,0,0"
+                                           HorizontalAlignment="Right"
+                                           Style="{StaticResource CaptionStyle}"
+                                           Text="Open this workspace or refresh to check the Base Filtering Engine."
+                                           TextAlignment="Right"
+                                           TextWrapping="Wrap" />
+                            </ScrollViewer>
                         </StackPanel>
                     </DockPanel>
                 </Border>
@@ -86,15 +77,15 @@
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource CardBorderStyle}" Padding="0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel x:Name="PolicyEditorPanel" Margin="16,15,16,16">
-                        <TextBlock Style="{StaticResource WfpStepTitleStyle}"
-                                   Text="1  Choose the application" />
+                        <TextBlock Style="{StaticResource StepTitleStyle}"
+                                   Text="1. Choose the application" />
                         <TextBlock Margin="0,5,0,10"
                                    Style="{StaticResource CaptionStyle}"
                                    Text="WFP identifies a normal Win32 application by its full normalized path—not just its binary name, signer, hash, PID, or process tree. The file must exist when the rule is added."
                                    TextWrapping="Wrap" />
-                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Executable path" />
+                        <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Executable path" />
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -104,14 +95,14 @@
                                      AutomationProperties.Name="Executable path for WFP Blocking" />
                             <Button Grid.Column="1"
                                     Margin="7,0,0,0"
-                                    Padding="9,5"
+                                    Style="{StaticResource CompactButtonStyle}"
                                     Click="BrowseExecutable_Click"
                                     Content="Browse…" />
                         </Grid>
 
                         <Separator Margin="0,18,0,16" />
-                        <TextBlock Style="{StaticResource WfpStepTitleStyle}"
-                                   Text="2  Select the flows to block" />
+                        <TextBlock Style="{StaticResource StepTitleStyle}"
+                                   Text="2. Select the flows to block" />
                         <TextBlock Margin="0,5,0,10"
                                    Style="{StaticResource CaptionStyle}"
                                    Text="Outbound means locally initiated flows; inbound means remotely initiated TCP accepts and first inbound UDP or ICMP traffic. Replies stay with the stateful flow that created them."
@@ -124,7 +115,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Direction" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Direction" />
                                 <CheckBox x:Name="OutboundCheckBox"
                                           IsChecked="True"
                                           Content="Outbound connect / send" />
@@ -134,7 +125,7 @@
                                           Content="Inbound receive / accept" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="IP version" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="IP version" />
                                 <CheckBox x:Name="Ipv4CheckBox" IsChecked="True" Content="IPv4" />
                                 <CheckBox x:Name="Ipv6CheckBox"
                                           Margin="0,6,0,0"
@@ -160,7 +151,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Protocol" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Protocol" />
                                 <ComboBox x:Name="ProtocolComboBox"
                                           SelectedIndex="0"
                                           SelectionChanged="Protocol_SelectionChanged">
@@ -171,7 +162,7 @@
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Interface" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Interface" />
                                 <ComboBox x:Name="InterfaceComboBox"
                                           DisplayMemberPath="DisplayName"
                                           AutomationProperties.Name="Network interface scope" />
@@ -185,13 +176,13 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Local port (optional)" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Local port (optional)" />
                                 <TextBox x:Name="LocalPortTextBox"
                                          IsEnabled="False"
                                          ToolTip="1 through 65535; TCP or UDP only" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Remote port (optional)" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Remote port (optional)" />
                                 <TextBox x:Name="RemotePortTextBox"
                                          IsEnabled="False"
                                          ToolTip="1 through 65535; TCP or UDP only" />
@@ -205,12 +196,12 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Local IP or CIDR (optional)" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Local IP or CIDR (optional)" />
                                 <TextBox x:Name="LocalNetworkTextBox"
                                          ToolTip="For example 127.0.0.1/32 or 2001:db8::/32" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Remote IP or CIDR (optional)" />
+                                <TextBlock Style="{StaticResource StackedFieldLabelStyle}" Text="Remote IP or CIDR (optional)" />
                                  <TextBox x:Name="RemoteNetworkTextBox"
                                          ToolTip="For example 10.0.0.0/8 or 2001:db8::/32" />
                             </StackPanel>
@@ -247,7 +238,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Style="{StaticResource WfpStepTitleStyle}" Text="Active policy" />
+                            <TextBlock Style="{StaticResource StepTitleStyle}" Text="Active policy" />
                             <TextBlock x:Name="SessionStateText"
                                        Margin="0,6,0,0"
                                        FontWeight="SemiBold"
@@ -261,6 +252,7 @@
                         <Button x:Name="CloseSessionButton"
                                 Grid.Column="1"
                                 Margin="12,0,0,0"
+                                Style="{StaticResource CompactButtonStyle}"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Top"
                                 Click="CloseSession_Click"
@@ -287,12 +279,7 @@
                                  AutomationProperties.Name="Active Shackles WFP block rules">
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Margin="8,6"
-                                            Padding="10"
-                                            Background="{DynamicResource MutedPanelBrush}"
-                                            BorderBrush="{DynamicResource BorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="5">
+                                    <Border Margin="8,6" Style="{StaticResource OptionCardStyle}">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -303,7 +290,7 @@
                                             <DockPanel>
                                                 <Button DockPanel.Dock="Right"
                                                         Margin="10,0,0,0"
-                                                        Padding="7,4"
+                                                        Style="{StaticResource RowActionButtonStyle}"
                                                         Tag="{Binding}"
                                                         Click="RemoveRule_Click"
                                                         Content="Remove" />
@@ -335,13 +322,13 @@
                 </Border>
 
                 <Border Grid.Row="4"
-                        Padding="11,8"
-                        Background="{DynamicResource MutedPanelBrush}"
-                        BorderBrush="{DynamicResource BorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="5">
-                    <TextBlock x:Name="NoticeText"
-                               Style="{StaticResource CaptionStyle}"
+                        Style="{StaticResource NoticeBorderStyle}">
+                    <TextBox x:Name="NoticeText"
+                               IsReadOnly="True" MaxHeight="120"
+                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                               Background="Transparent" BorderThickness="0" Padding="0" MinHeight="0"
+                               Foreground="{DynamicResource TextBrush}"
+                               AutomationProperties.Name="WFP operation result"
                                Text="Rules take effect immediately for matching executions when their transaction commits."
                                TextWrapping="Wrap"
                                AutomationProperties.LiveSetting="Polite" />
@@ -353,17 +340,8 @@
               Grid.Row="2"
               Visibility="Collapsed"
               AutomationProperties.Name="Administrator access required for WFP Blocking">
-            <Border Background="{DynamicResource MutedPanelBrush}"
-                    BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8" />
-            <Border MaxWidth="620"
-                    MinWidth="480"
-                    Margin="32"
-                    Padding="0"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource CardBorderStyle}">
+            <Border Style="{StaticResource OptionCardStyle}" Padding="0" />
+            <Border Style="{StaticResource AdministratorPromptCardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="6" />
@@ -376,27 +354,22 @@
                             <ColumnDefinition Width="22" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Width="58"
-                                Height="58"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Top"
-                                Background="{DynamicResource AccentBrush}"
-                                CornerRadius="29">
-                            <TextBlock HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       FontSize="25"
-                                       FontWeight="Bold"
-                                       Foreground="{DynamicResource AccentTextBrush}"
-                                       Text="!" />
+                        <Border Style="{StaticResource AdministratorPromptIconStyle}">
+                            <Viewbox Width="28" Height="31">
+                                <Path Data="{StaticResource AdministratorShieldGeometry}"
+                                      Stroke="{DynamicResource AccentTextBrush}"
+                                      StrokeThickness="2.2"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round" />
+                            </Viewbox>
                         </Border>
                         <StackPanel Grid.Column="2">
-                            <TextBlock FontSize="22"
-                                       FontWeight="SemiBold"
+                            <TextBlock Style="{StaticResource AdministratorPromptTitleStyle}"
                                        Text="Administrator access required" />
                             <TextBlock Margin="0,8,0,0"
-                                       FontSize="14"
-                                       Text="The Base Filtering Engine requires elevated policy-management access before Shackles can add or remove these filters. The target application itself does not need to run elevated."
-                                       TextWrapping="Wrap" />
+                                       Style="{StaticResource AdministratorPromptBodyStyle}"
+                                       Text="The Base Filtering Engine requires elevated policy-management access before Shackles can add or remove these filters. The target application itself does not need to run elevated." />
                             <TextBlock Margin="0,9,0,0"
                                        Style="{StaticResource CaptionStyle}"
                                        Text="Open an administrator copy directly on WFP Blocking. This Shackles window stays open, along with any work in the other workspaces."
@@ -411,6 +384,7 @@
                             <TextBlock x:Name="ElevationLaunchStatusText"
                                        Margin="0,10,0,0"
                                        Style="{StaticResource CaptionStyle}"
+                                       Foreground="{DynamicResource TextBrush}"
                                        TextWrapping="Wrap"
                                        Visibility="Collapsed"
                                        AutomationProperties.LiveSetting="Polite" />

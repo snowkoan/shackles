@@ -13,6 +13,7 @@ public sealed class ProcessIdentityCaptureTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void TryCaptureCurrentProcessReturnsStableKernelIdentity()
     {
         var first = JobObject.TryCaptureProcessIdentity(Environment.ProcessId);
@@ -30,6 +31,7 @@ public sealed class ProcessIdentityCaptureTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void TryCaptureIdlePidReturnsActualOpenProcessFailure()
     {
         var result = JobObject.TryCaptureProcessIdentity(0);

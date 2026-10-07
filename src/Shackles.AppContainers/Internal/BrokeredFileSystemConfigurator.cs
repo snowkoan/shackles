@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
 
 namespace Shackles.AppContainers.Internal;
@@ -115,8 +114,6 @@ internal sealed class BrokeredFileSystemConfigurator :
     private const string FailureMarker =
         "Unable to perform policy operation";
     private const int OutputLimit = 16 * 1024;
-    private static readonly TimeSpan OperationTimeout =
-        TimeSpan.FromSeconds(10);
 
     internal BrokeredFileSystemConfigurator()
         : this(BrokeredFileSystemSupportProbe.Probe())
@@ -235,50 +232,20 @@ internal sealed class BrokeredFileSystemConfigurator :
         }
 
         var output = new BoundedProcessOutput(OutputLimit);
-        using var process = new Process
-        {
-            StartInfo = startInfo,
-            EnableRaisingEvents = false
-        };
-        process.OutputDataReceived += (_, eventArgs) =>
-            output.Append("stdout", eventArgs.Data);
-        process.ErrorDataReceived += (_, eventArgs) =>
-            output.Append("stderr", eventArgs.Data);
+        using var process = new BrokeredConfigurationProcess(startInfo, output.Append);
 
         try
         {
-            if (!process.Start())
-            {
-                throw new AppContainerException(
-                    operation,
-                    $"Windows did not start '{toolPath}' to {description}.");
-            }
-
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            if (!process.WaitForExit(
-                    checked((int)OperationTimeout.TotalMilliseconds)))
-            {
-                TryTerminate(process);
-                throw new AppContainerException(
-                    operation,
-                    $"'{toolPath}' did not exit within " +
-                    $"{OperationTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} " +
-                    $"seconds while trying to {description}. The BFS policy state " +
-                    "is uncertain; close the sandbox to retry cleanup.");
-            }
-
-            // Flush asynchronous output handlers after the process handle signals.
-            process.WaitForExit();
+            var exitCode = BrokeredConfigurationProcessRunner.Run(process);
             var captured = output.GetText();
-            if (process.ExitCode != 0 || output.ContainsFailureMarker)
+            if (exitCode != 0 || output.ContainsFailureMarker)
             {
                 var diagnostic = captured.Length == 0
                     ? "bfscfg.exe produced no diagnostic output."
                     : captured;
                 throw new AppContainerException(
                     operation,
-                    $"bfscfg.exe exited with code {process.ExitCode} while " +
+                    $"bfscfg.exe exited with code {exitCode} while " +
                     $"trying to {description}. {diagnostic}");
             }
         }
@@ -290,7 +257,7 @@ internal sealed class BrokeredFileSystemConfigurator :
         {
             throw new AppContainerException(
                 operation,
-                $"Could not run the OS-shipped bfscfg.exe to {description}.",
+                $"Could not run the OS-shipped bfscfg.exe to {description}. {exception.Message}",
                 innerException: exception);
         }
     }
@@ -300,20 +267,6 @@ internal sealed class BrokeredFileSystemConfigurator :
             Path.GetFullPath(path),
             @"C:\",
             StringComparison.OrdinalIgnoreCase);
-
-    private static void TryTerminate(Process process)
-    {
-        try
-        {
-            process.Kill(entireProcessTree: true);
-            _ = process.WaitForExit(1_000);
-        }
-        catch
-        {
-            // The timeout error remains authoritative. A stuck kernel-side BFS
-            // operation may prevent ordinary process termination.
-        }
-    }
 
     private sealed class BoundedProcessOutput
     {

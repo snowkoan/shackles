@@ -86,8 +86,12 @@ internal sealed class CleanupJournal
                 return;
             }
 
-            _record.Grants.Add(grant);
-            PersistCore();
+            var updated = _record with
+            {
+                Grants = [.. _record.Grants, grant]
+            };
+            PersistRecord(_path, updated);
+            _record = updated;
         }
     }
 
@@ -124,11 +128,12 @@ internal sealed class CleanupJournal
                 return;
             }
 
-            _record = _record with
+            var updated = _record with
             {
                 BrokeredFileSystemPolicyMayExist = true
             };
-            PersistCore();
+            PersistRecord(_path, updated);
+            _record = updated;
         }
     }
 
@@ -141,11 +146,12 @@ internal sealed class CleanupJournal
                 return;
             }
 
-            _record = _record with
+            var updated = _record with
             {
                 BrokeredFileSystemPolicyMayExist = false
             };
-            PersistCore();
+            PersistRecord(_path, updated);
+            _record = updated;
         }
     }
 

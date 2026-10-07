@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -9,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Shackles.App.Dialogs;
+using Shackles.App.Infrastructure;
 using Shackles.App.Models;
 using Shackles.App.ViewModels;
 using Shackles.Wesp;
@@ -81,7 +81,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             try
             {
                 return _session.GetProcesses().Count(process =>
-                    process.IsRunning && process.Origin == WespProcessOrigin.Launched);
+                    (process.IsRunning || process.IsStateUnknown) && process.Origin == WespProcessOrigin.Launched);
             }
             catch
             {
@@ -209,44 +209,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
 
         try
         {
-            var executablePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executablePath))
-            {
-                throw new InvalidOperationException(
-                    "Windows could not determine the Shackles application path.");
-            }
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = executablePath,
-                WorkingDirectory = Environment.CurrentDirectory,
-                UseShellExecute = true,
-                Verb = "runas"
-            };
-
-            if (string.Equals(
-                    Path.GetFileNameWithoutExtension(executablePath),
-                    "dotnet",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                var applicationAssemblyPath = typeof(App).Assembly.Location;
-                if (string.IsNullOrWhiteSpace(applicationAssemblyPath))
-                {
-                    throw new InvalidOperationException(
-                        "Windows could not determine the Shackles application assembly path.");
-                }
-
-                startInfo.ArgumentList.Add(applicationAssemblyPath);
-            }
-
-            startInfo.ArgumentList.Add(App.WespWorkspaceArgument);
-            using var elevatedProcess = Process.Start(startInfo);
-            if (elevatedProcess is null)
-            {
-                throw new InvalidOperationException(
-                    "Windows did not start the administrator copy of Shackles.");
-            }
-
+            ElevatedApplicationLauncher.Launch(App.WespWorkspaceArgument);
             OpenElevatedWespButton.IsEnabled = false;
             ElevationLaunchStatusText.Text =
                 "An administrator copy is opening directly on WESP Blocking. This window remains open.";
@@ -862,7 +825,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         try
         {
             existingMembers = existingSession?.GetProcesses()
-                .Where(process => process.IsRunning)
+                .Where(process => process.IsRunning || process.IsStateUnknown)
                 .Select(process => new ProcessIdentity(
                     process.ProcessId,
                     process.CreationTimeFileTimeUtc))
@@ -1061,11 +1024,13 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         try
         {
             var runningProcesses = session.GetProcesses()
-                .Where(process => process.IsRunning)
+                .Where(process => process.IsRunning || process.IsStateUnknown)
                 .OrderBy(process => process.ProcessId)
                 .ToArray();
             var running = runningProcesses
-                .Select(process => process.Origin == WespProcessOrigin.Launched
+                .Select(process => process.IsStateUnknown
+                    ? $"PID {process.ProcessId} · state unknown · {process.StateError}"
+                    : process.Origin == WespProcessOrigin.Launched
                     ? $"PID {process.ProcessId} · launched by Shackles"
                     : $"PID {process.ProcessId} · selected while running")
                 .ToArray();
@@ -1076,7 +1041,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
                 ShowNotice(
                     running.Length == 0
                         ? "The WESP Blocking session is active, with no running session processes."
-                        : $"The WESP Blocking session reports {running.Length} running session process" +
+                        : $"The WESP Blocking session tracks {running.Length} session process" +
                           (running.Length == 1 ? "." : "es."));
             }
         }
@@ -1733,6 +1698,63 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         }
     }
 
+    public async Task<IReadOnlyList<string>> CloseAllAsync()
+    {
+        if (_disposed || _session is null)
+        {
+            return [];
+        }
+
+        if (_isBusy)
+        {
+            return ["WESP Blocking: wait for the current operation before closing the session."];
+        }
+
+        var session = _session;
+        var warnings = new List<string>();
+        _sessionRefreshTimer.Stop();
+        SetBusy(true);
+        try
+        {
+            await Task.Run(session.Close).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            warnings.Add($"WESP Blocking: {exception.Message}");
+        }
+        finally
+        {
+            if (session.IsClosed)
+            {
+                _session = null;
+                session.Dispose();
+                _runningSessionProcessCount = 0;
+                MemberProcessList.ItemsSource = Array.Empty<string>();
+                ActivityCaptureStatusText.Text = "Activity capture stopped with the closed blocking session.";
+            }
+            else
+            {
+                if (warnings.Count == 0)
+                {
+                    warnings.Add("WESP Blocking: session cleanup was not confirmed. Retry closing the session.");
+                }
+
+                _sessionRefreshTimer.Start();
+                RefreshSessionDetails(showProcessNotice: false);
+            }
+
+            SetBusy(false);
+            UpdateSummary();
+        }
+
+        if (warnings.Count != 0)
+        {
+            ShowNotice(string.Join(Environment.NewLine, warnings));
+        }
+
+        return warnings;
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -1751,7 +1773,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         }
     }
 
-    private sealed class WespResourceRuleDraft : INotifyPropertyChanged
+    private sealed class WespResourceRuleDraft : ObservableObject
     {
         private readonly Action _onChanged;
         private int _accessIndex;
@@ -1766,8 +1788,6 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             _onChanged = onChanged;
         }
 
-        public event PropertyChangedEventHandler? PropertyChanged;
-
         public string Path { get; }
 
         public int AccessIndex
@@ -1775,17 +1795,10 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             get => _accessIndex;
             set
             {
-                var normalized = NormalizeAccessIndex(value);
-                if (_accessIndex == normalized)
+                if (SetProperty(ref _accessIndex, NormalizeAccessIndex(value)))
                 {
-                    return;
+                    _onChanged();
                 }
-
-                _accessIndex = normalized;
-                PropertyChanged?.Invoke(
-                    this,
-                    new PropertyChangedEventArgs(nameof(AccessIndex)));
-                _onChanged();
             }
         }
     }

@@ -63,6 +63,7 @@ public sealed class WespPolicyTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void NormalizeRegistryAliasesToCanonicalNtPathsWithoutRequiringKeysToExist()
     {
         var uniqueSubKey = $@"Software\Shackles.Tests\Missing-{Guid.NewGuid():N}";
@@ -90,6 +91,7 @@ public sealed class WespPolicyTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void NormalizeHkcrExpandsToUserAndMachineClassViews()
     {
         var normalized = WespPolicyNormalizer.Normalize(EmptyPolicy() with
@@ -107,6 +109,7 @@ public sealed class WespPolicyTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void NormalizeResolvesCurrentUserClassesToItsNativeMount()
     {
         var normalized = WespPolicyNormalizer.Normalize(EmptyPolicy() with
@@ -138,6 +141,7 @@ public sealed class WespPolicyTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void NormalizeAcceptsRegistryHiveRootsWithoutSubkeys()
     {
         var normalized = WespPolicyNormalizer.Normalize(EmptyPolicy() with
@@ -153,6 +157,7 @@ public sealed class WespPolicyTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void NormalizeHkcuRootExpandsToUserAndUserClassesHives()
     {
         using var identity = WindowsIdentity.GetCurrent();

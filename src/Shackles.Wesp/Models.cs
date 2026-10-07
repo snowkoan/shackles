@@ -47,7 +47,11 @@ public sealed record WespTrackedProcessInfo(
     int ProcessId,
     long CreationTimeFileTimeUtc,
     bool IsRunning,
-    WespProcessOrigin Origin);
+    WespProcessOrigin Origin)
+{
+    public string? StateError { get; init; }
+    public bool IsStateUnknown => StateError is not null;
+}
 
 public enum WespApplyProcessStatus
 {

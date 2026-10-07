@@ -1,12 +1,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Security.Principal;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using Shackles.App.Infrastructure;
 using Shackles.Wfp;
 
 namespace Shackles.App.Views;
@@ -211,43 +211,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
 
         try
         {
-            var executablePath = Environment.ProcessPath;
-            if (string.IsNullOrWhiteSpace(executablePath))
-            {
-                throw new InvalidOperationException(
-                    "Windows could not determine the Shackles application path.");
-            }
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = executablePath,
-                WorkingDirectory = Environment.CurrentDirectory,
-                UseShellExecute = true,
-                Verb = "runas"
-            };
-            if (string.Equals(
-                    Path.GetFileNameWithoutExtension(executablePath),
-                    "dotnet",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                var applicationAssemblyPath = typeof(App).Assembly.Location;
-                if (string.IsNullOrWhiteSpace(applicationAssemblyPath))
-                {
-                    throw new InvalidOperationException(
-                        "Windows could not determine the Shackles application assembly path.");
-                }
-
-                startInfo.ArgumentList.Add(applicationAssemblyPath);
-            }
-
-            startInfo.ArgumentList.Add(App.WfpWorkspaceArgument);
-            using var elevatedProcess = Process.Start(startInfo);
-            if (elevatedProcess is null)
-            {
-                throw new InvalidOperationException(
-                    "Windows did not start the administrator copy of Shackles.");
-            }
-
+            ElevatedApplicationLauncher.Launch(App.WfpWorkspaceArgument);
             OpenElevatedWfpButton.IsEnabled = false;
             ElevationLaunchStatusText.Text =
                 "An administrator copy is opening directly on WFP Blocking. This window remains open.";
@@ -292,11 +256,6 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
         var portsAvailable = ProtocolComboBox.SelectedIndex is 1 or 2;
         LocalPortTextBox.IsEnabled = portsAvailable;
         RemotePortTextBox.IsEnabled = portsAvailable;
-        if (!portsAvailable)
-        {
-            LocalPortTextBox.Clear();
-            RemotePortTextBox.Clear();
-        }
     }
 
     private async void AddRule_Click(object sender, RoutedEventArgs e)
@@ -309,7 +268,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
         WfpBlockRuleOptions options;
         try
         {
-            options = WfpSession.ValidateBlockRule(BuildOptions());
+            options = ValidateEditorRuleOptions(BuildOptions());
         }
         catch (Exception exception) when (exception is
             ArgumentException or
@@ -317,7 +276,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
             UnauthorizedAccessException or
             NotSupportedException)
         {
-            ShowInputError(exception.Message);
+            ShowInputError(exception.Message, (exception as EditorValidationException)?.FieldName);
             return;
         }
 
@@ -375,7 +334,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
         }
     }
 
-    private WfpBlockRuleOptions BuildOptions()
+    internal WfpBlockRuleOptions BuildOptions()
     {
         var directions = WfpTrafficDirection.None;
         if (OutboundCheckBox.IsChecked == true)
@@ -405,7 +364,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
             1 => WfpTransportProtocol.Tcp,
             2 => WfpTransportProtocol.Udp,
             3 => WfpTransportProtocol.Icmp,
-            _ => throw new ArgumentException("Choose a supported protocol.")
+            _ => throw new EditorValidationException("Choose a supported protocol.", nameof(ProtocolComboBox))
         };
         var interfaceChoice = InterfaceComboBox.SelectedItem as InterfaceChoice;
         return new WfpBlockRuleOptions(
@@ -413,8 +372,8 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
             directions,
             ipVersions,
             protocol,
-            ParsePort(LocalPortTextBox.Text, "Local port"),
-            ParsePort(RemotePortTextBox.Text, "Remote port"),
+            ParsePortForProtocol(LocalPortTextBox.Text, "Local port", nameof(LocalPortTextBox), protocol),
+            ParsePortForProtocol(RemotePortTextBox.Text, "Remote port", nameof(RemotePortTextBox), protocol),
             NullIfWhiteSpace(LocalNetworkTextBox.Text),
             NullIfWhiteSpace(RemoteNetworkTextBox.Text),
             interfaceChoice?.Interface?.Luid,
@@ -538,12 +497,6 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
         }
         else
         {
-            if (result.ExplicitRemovalSucceeded)
-            {
-                session.Dispose();
-                _session = null;
-            }
-
             var details = result.Warnings.Count == 0
                 ? "WFP did not confirm that the session closed."
                 : string.Join(Environment.NewLine + Environment.NewLine, result.Warnings);
@@ -593,7 +546,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
 
     private void ShowNotice(string message) => NoticeText.Text = message;
 
-    private void ShowInputError(string message)
+    private void ShowInputError(string message, string? fieldName)
     {
         MessageBox.Show(
             Window.GetWindow(this),
@@ -602,11 +555,60 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
             MessageBoxButton.OK,
             MessageBoxImage.Information);
         ShowNotice(message);
+        if (fieldName is not null && FindName(fieldName) is Control control)
+        {
+            control.BringIntoView();
+            control.Focus();
+            if (control is TextBox textBox)
+            {
+                textBox.SelectAll();
+            }
+        }
     }
 
-    private static ushort? ParsePort(string text, string label)
+    internal static WfpBlockRuleOptions ValidateEditorRuleOptions(WfpBlockRuleOptions options)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        // Validate the shared selectors first, then isolate each address field so errors identify
+        // an editable control without guessing from a Windows or localized exception message.
+        if (options.Directions == WfpTrafficDirection.None)
+        {
+            throw new EditorValidationException("Select inbound, outbound, or both directions.", nameof(OutboundCheckBox));
+        }
+
+        if (options.IpVersions == WfpIpVersion.None)
+        {
+            throw new EditorValidationException("Select IPv4, IPv6, or both IP versions.", nameof(Ipv4CheckBox));
+        }
+
+        ValidateRuleField(options with { LocalNetwork = null, RemoteNetwork = null }, nameof(ExecutablePathTextBox));
+        if (!string.IsNullOrWhiteSpace(options.LocalNetwork))
+        {
+            ValidateRuleField(options with { RemoteNetwork = null }, nameof(LocalNetworkTextBox));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.RemoteNetwork))
+        {
+            ValidateRuleField(options with { LocalNetwork = null }, nameof(RemoteNetworkTextBox));
+        }
+
+        return ValidateRuleField(options, nameof(RemoteNetworkTextBox));
+    }
+
+    private static WfpBlockRuleOptions ValidateRuleField(WfpBlockRuleOptions options, string fieldName)
+    {
+        try
+        {
+            return WfpSession.ValidateBlockRule(options);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw new EditorValidationException(exception.Message, fieldName);
+        }
+    }
+
+    internal static ushort? ParsePortForProtocol(string text, string label, string fieldName, WfpTransportProtocol protocol)
+    {
+        if (protocol is not (WfpTransportProtocol.Tcp or WfpTransportProtocol.Udp) || string.IsNullOrWhiteSpace(text))
         {
             return null;
         }
@@ -617,7 +619,7 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
                 CultureInfo.InvariantCulture,
                 out var port) || port == 0)
         {
-            throw new ArgumentException($"{label} must be a number from 1 through 65535.");
+            throw new EditorValidationException($"{label} must be a whole number from 1 through 65535.", fieldName);
         }
 
         return port;
@@ -625,6 +627,65 @@ public sealed partial class WfpWorkspaceView : UserControl, IDisposable
 
     private static string? NullIfWhiteSpace(string value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    internal sealed class EditorValidationException(string message, string fieldName) : ArgumentException(message)
+    {
+        public string FieldName { get; } = fieldName;
+    }
+
+    public async Task<IReadOnlyList<string>> CloseAllAsync()
+    {
+        if (_disposed || _session is null)
+        {
+            return [];
+        }
+
+        if (_isBusy)
+        {
+            return ["WFP Blocking: wait for the current operation before closing the policy."];
+        }
+
+        var session = _session;
+        SetBusy(true);
+        try
+        {
+            var result = await Task.Run(session.Close).ConfigureAwait(true);
+            if (result.ExplicitRemovalSucceeded)
+            {
+                _ruleRows.Clear();
+            }
+
+            if (result.DynamicSessionClosed)
+            {
+                _session = null;
+                session.Dispose();
+                _ruleRows.Clear();
+            }
+
+            var warnings = result.Warnings.Select(warning => $"WFP Blocking: {warning}").ToList();
+            if (!result.DynamicSessionClosed && warnings.Count == 0)
+            {
+                warnings.Add("WFP Blocking: session cleanup was not confirmed. Retry closing the policy.");
+            }
+
+            if (warnings.Count != 0)
+            {
+                ShowNotice(string.Join(Environment.NewLine, warnings));
+            }
+
+            return warnings;
+        }
+        catch (Exception exception)
+        {
+            var warning = $"WFP Blocking: {exception.Message}";
+            ShowNotice(warning);
+            return [warning];
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
 
     public void Dispose()
     {

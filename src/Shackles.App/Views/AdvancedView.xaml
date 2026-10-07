@@ -62,10 +62,13 @@
                     <ComboBox Width="280"
                               HorizontalAlignment="Left"
                               ItemsSource="{Binding Editor.EndActionChoices}"
-                              SelectedItem="{Binding Editor.EndAction}" />
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              ToolTip="{Binding SelectedItem.Description, RelativeSource={RelativeSource Self}}"
+                              SelectedValue="{Binding Editor.EndAction}" />
                     <TextBlock Margin="0,6,0,0"
                                Style="{StaticResource CaptionStyle}"
-                               Text="TerminateAtEndOfJob enforces the per-job time limit. PostNotification is offered only when this Shackles handle owns and consumes a live completion port." />
+                               Text="Termination enforces the per-job time limit. A new notification action requires a live port owned by Shackles. An existing notification action can be preserved when you edit an opened job." />
                 </StackPanel>
             </GroupBox>
         </StackPanel>

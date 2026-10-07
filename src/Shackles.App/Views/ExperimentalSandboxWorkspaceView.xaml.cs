@@ -2,7 +2,10 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
+using Shackles.App.Controls;
+using Shackles.App.Infrastructure;
 using Shackles.App.Models;
 using Shackles.ExperimentalSandboxes;
 
@@ -11,20 +14,27 @@ namespace Shackles.App.Views;
 public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDisposable
 {
     private readonly ObservableCollection<ExperimentalSandboxCard> _cards = [];
-    private readonly ExperimentalSandboxManager _manager;
+    private readonly Func<ExperimentalSandboxManager> _managerFactory;
+    private ExperimentalSandboxManager? _manager;
+    private Task? _initializationTask;
     private ExperimentalSandboxCard? _loadedCard;
     private bool _isReady;
     private bool _isBusy;
     private bool _hasPreparedInitialDisplay;
     private bool _disposed;
 
-    public ExperimentalSandboxWorkspaceView()
+    public ExperimentalSandboxWorkspaceView() : this(static () => new ExperimentalSandboxManager())
     {
+    }
+
+    internal ExperimentalSandboxWorkspaceView(Func<ExperimentalSandboxManager> managerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(managerFactory);
+        _managerFactory = managerFactory;
         InitializeComponent();
         SandboxList.ItemsSource = _cards;
-        _manager = new ExperimentalSandboxManager();
         _isReady = true;
-        UpdateSupportDisplay(_manager.Support);
+        SupportStateText.Text = "Support has not been checked";
         UpdateEmptyStates();
     }
 
@@ -47,9 +57,27 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         _hasPreparedInitialDisplay = true;
-        _ = Dispatcher.BeginInvoke(() =>
+        _ = InitializeAsync();
+    }
+
+    internal Task InitializeAsync() => _manager is not null ? Task.CompletedTask :
+        _initializationTask is { IsCompleted: false } pending ? pending :
+        _initializationTask = InitializeCoreAsync();
+
+    private async Task InitializeCoreAsync()
+    {
+        SetBusy(true);
+        ShowNotice("Checking experimental sandbox support…");
+        try
         {
-            var support = _manager.RefreshSupport();
+            var manager = await Task.Run(_managerFactory).ConfigureAwait(true);
+            if (_disposed)
+            {
+                await Task.Run(manager.Dispose).ConfigureAwait(true);
+                return;
+            }
+            _manager = manager;
+            var support = manager.Support;
             UpdateSupportDisplay(support);
             if (!support.IsAvailable)
             {
@@ -57,12 +85,24 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
                     "You can design policies here, but Windows does not currently " +
                     "advertise experimental process sandbox creation.");
             }
-        });
+            else { ShowNotice(support.Summary); }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (!_disposed)
+            {
+                SupportStateText.Text = "Support check failed — choose Refresh support to retry";
+                SupportDetailText.Text = exception.Message;
+                ShowNotice($"Sandbox support could not be checked: {exception.Message}");
+            }
+            _hasPreparedInitialDisplay = false;
+        }
+        finally { if (!_disposed) { SetBusy(false); } }
     }
 
     private void NewSandbox_Click(object sender, RoutedEventArgs e)
     {
-        if (_isBusy || !_manager.Support.IsAvailable)
+        if (_isBusy || _manager?.Support.IsAvailable != true)
         {
             return;
         }
@@ -108,6 +148,9 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             LoadSelectedCard();
         }
     }
+
+    private void Workspace_PreviewKeyDown(object sender, KeyEventArgs e) =>
+        SandboxList.HandleWorkspaceKeyDown(e);
 
     private void LoadSelectedCard()
     {
@@ -163,13 +206,15 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         var active = _loadedCard.IsActive;
-        PolicyEditor.IsEnabled = !active;
-        EnvironmentModeComboBox.IsEnabled = !active;
+        PolicyEditor.IsEnabled = !active && !_isBusy;
+        EnvironmentModeComboBox.IsEnabled = !active && !_isBusy;
         ResetDraftButton.IsEnabled = !active && !_isBusy;
         CreateAndLaunchButton.Content = active
             ? "_Launch another process"
             : "_Create sandbox and launch";
-        CloseSandboxButton.Content = active ? "_Close sandbox" : "_Discard draft";
+        CloseSandboxButton.Content = _loadedCard.NeedsCleanup
+            ? "_Retry cleanup"
+            : active ? "_Close sandbox" : "_Discard draft";
         UpdateAppContainerDependentControls();
         RefreshPreview();
     }
@@ -226,10 +271,9 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         SaveControlsToDraft();
-        _loadedCard.RefreshDraft();
+        _loadedCard.Refresh();
         if (_loadedCard.IsActive)
         {
-            _loadedCard.Refresh();
             SyncEffectiveRulesToDraft(_loadedCard);
         }
 
@@ -285,22 +329,16 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             System.Globalization.CultureInfo.CurrentCulture);
         MemberProcessList.ItemsSource = processIds.Select(processId => $"PID {processId}").ToArray();
         LifetimeSummaryText.Text = _loadedCard.IsActive
-            ? "Identity and Windows profile remain until this card closes or Shackles exits. " +
+            ? "Identity and Windows profile remain until this tab closes or Shackles exits. " +
               "Every launch receives a separate OS-managed Job Object."
             : "Nothing exists in Windows until the first successful launch.";
-        DenySupportText.Text = DenySupportDescription(_manager.Support);
+        DenySupportText.Text = _manager is { } manager
+            ? DenySupportDescription(manager.Support)
+            : "Support has not been checked yet.";
         UpdateActionState();
     }
 
-    private void PreviewOption_Changed(object sender, RoutedEventArgs e) =>
-        RefreshPreview();
-
-    private void PreviewSelection_Changed(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        RefreshPreview();
-
-    private void PreviewText_Changed(object sender, TextChangedEventArgs e) =>
+    private void Preview_Changed(object sender, RoutedEventArgs e) =>
         RefreshPreview();
 
     private void AppContainerOption_Changed(object sender, RoutedEventArgs e)
@@ -308,23 +346,6 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         if (!_isReady || _loadedCard?.IsActive == true)
         {
             return;
-        }
-
-        if (UseAppContainerCheckBox.IsChecked == true)
-        {
-            IntegrityComboBox.SelectedIndex = 0;
-        }
-        else
-        {
-            LeastPrivilegeCheckBox.IsChecked = false;
-            NetworkModeComboBox.SelectedIndex = 0;
-            ProxyUrlTextBox.Clear();
-            InternetClientCheckBox.IsChecked = false;
-            InternetClientServerCheckBox.IsChecked = false;
-            PrivateNetworkCheckBox.IsChecked = false;
-            RegistryReadCheckBox.IsChecked = false;
-            CustomCapabilitiesTextBox.Clear();
-            _loadedCard?.Draft.FileRules.Clear();
         }
 
         UpdateAppContainerDependentControls();
@@ -376,7 +397,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             ShowNotice(
                 _loadedCard?.IsActive == true
                     ? "The target is ready. Its directory will be added to the " +
-                      "card's native read-only policy when launched."
+                      "tab's native read-only policy when launched."
                     : "The target is part of this draft. Nothing has been launched.");
         }
     }
@@ -502,12 +523,22 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             return;
         }
 
+        if (_manager is not { } manager)
+        {
+            await InitializeAsync().ConfigureAwait(true);
+            return;
+        }
+
         SetBusy(true);
         try
         {
-            var support = await Task.Run(_manager.RefreshSupport).ConfigureAwait(true);
+            var support = await Task.Run(manager.RefreshSupport).ConfigureAwait(true);
             UpdateSupportDisplay(support);
             ShowNotice(support.Summary);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            ShowNotice($"Sandbox support could not be refreshed: {exception.Message}");
         }
         finally
         {
@@ -517,7 +548,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
 
     private async void CreateAndLaunch_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadedCard is null || _isBusy)
+        if (_loadedCard is null || _isBusy || _manager is null || _loadedCard.NeedsCleanup)
         {
             return;
         }
@@ -529,16 +560,18 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         var card = _loadedCard;
+        var manager = _manager;
+        var existingSandbox = card.Sandbox;
+        var sandboxOptions = BuildSandboxOptions(card.Draft);
+        var launchOptions = BuildLaunchOptions(card.Draft);
         SetBusy(true);
         try
         {
             ExperimentalSandboxLaunchResult launch;
-            if (card.Sandbox is null)
+            if (existingSandbox is null)
             {
                 var creation = await Task.Run(() =>
-                    _manager.CreateAndLaunch(
-                        BuildSandboxOptions(card.Draft),
-                        BuildLaunchOptions(card.Draft))).ConfigureAwait(true);
+                    manager.CreateAndLaunch(sandboxOptions, launchOptions)).ConfigureAwait(true);
                 launch = creation.FirstLaunch;
                 card.Attach(creation.Sandbox);
                 creation.Sandbox.Changed += SandboxChanged;
@@ -546,7 +579,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             else
             {
                 launch = await Task.Run(() =>
-                    card.Sandbox.Launch(BuildLaunchOptions(card.Draft)))
+                    existingSandbox.Launch(launchOptions))
                     .ConfigureAwait(true);
                 card.Refresh();
             }
@@ -556,23 +589,28 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             {
                 SandboxList.SelectedItem = card;
                 LoadSelectedCard();
-                ShowLaunchResult(
-                    launch,
+                ShowNotice(
                     $"Launched PID {launch.ProcessId} with identity " +
-                    $"{card.Sandbox!.Identity}.");
+                    $"{card.Sandbox!.Identity}." +
+                    (launch.Warnings.Count > 0 ? " " + string.Join(" ", launch.Warnings) : string.Empty));
             }
         }
         catch (Exception exception)
         {
+            AddPendingCleanupCards(card);
+            var cleanupPending = manager.Sandboxes.Any(
+                sandbox => sandbox.IsClosed && !sandbox.CleanupCompleted);
             ShowNotice(
-                card.IsActive
-                    ? "Launch failed. The existing sandbox card remains available."
+                cleanupPending
+                    ? "Launch failed and cleanup could not finish. The affected sandbox is retained; select Retry cleanup."
+                    : card.IsActive
+                    ? "Launch failed. The existing sandbox tab remains available."
                     : "Launch failed. The draft remains editable; any profile created " +
                       "during the attempt was cleaned up.");
             MessageBox.Show(
                 Window.GetWindow(this),
                 exception.Message,
-                card.IsActive
+                existingSandbox is not null
                     ? "Could not launch in experimental sandbox"
                     : "Could not create experimental sandbox",
                 MessageBoxButton.OK,
@@ -591,56 +629,101 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
 
     private async void CloseSandbox_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadedCard is null || _isBusy)
+        if (_loadedCard is { } card)
+        {
+            await RequestCloseSandboxAsync(card).ConfigureAwait(true);
+        }
+    }
+
+    private async void SandboxTab_CloseRequested(object? sender, InstanceTabCloseRequestedEventArgs e)
+    {
+        if (e.Item is ExperimentalSandboxCard card)
+        {
+            await RequestCloseSandboxAsync(card).ConfigureAwait(true);
+        }
+    }
+
+    private async Task RequestCloseSandboxAsync(ExperimentalSandboxCard card)
+    {
+        if (_isBusy || _disposed || !_cards.Contains(card))
         {
             return;
         }
 
-        var card = _loadedCard;
-        if (card.Sandbox is null)
+        if (card.Sandbox is { } sandbox)
+        {
+            var trackedCount = sandbox.GetSnapshot().ProcessIds.Count;
+            var question = trackedCount == 0
+                ? $"Close '{card.DisplayName}' and delete its Windows profile?"
+                : $"Close '{card.DisplayName}'? This terminates {trackedCount} directly " +
+                  $"launched process{(trackedCount == 1 ? string.Empty : "es")} and " +
+                  "deletes its Windows profile. The API does not expose the internal " +
+                  "Job Objects, so descendant lifetime cannot be inspected here.";
+            var answer = MessageBox.Show(
+                Window.GetWindow(this),
+                question,
+                "Close experimental sandbox",
+                MessageBoxButton.YesNo,
+                trackedCount == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        var cleanup = await CloseSandboxAsync(card).ConfigureAwait(true);
+        if (cleanup is { Completed: false })
+        {
+            MessageBox.Show(
+                Window.GetWindow(this),
+                string.Join(Environment.NewLine + Environment.NewLine, cleanup.Warnings),
+                "Sandbox closed with incomplete cleanup",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    internal async Task<ExperimentalSandboxCleanupResult?> CloseSandboxAsync(ExperimentalSandboxCard card)
+    {
+        if (_isBusy || _disposed || !_cards.Contains(card))
+        {
+            return null;
+        }
+
+        if (card.Sandbox is not { } sandbox)
         {
             RemoveCard(card);
-            return;
-        }
-
-        var snapshot = card.Sandbox.GetSnapshot();
-        var trackedCount = snapshot.ProcessIds.Count;
-        var question = trackedCount == 0
-            ? $"Close '{card.DisplayName}' and delete its Windows profile?"
-            : $"Close '{card.DisplayName}'? This terminates {trackedCount} directly " +
-              $"launched process{(trackedCount == 1 ? string.Empty : "es")} and " +
-              "deletes its Windows profile. The API does not expose the internal " +
-              "Job Objects, so descendant lifetime cannot be inspected here.";
-        var answer = MessageBox.Show(
-            Window.GetWindow(this),
-            question,
-            "Close experimental sandbox",
-            MessageBoxButton.YesNo,
-            trackedCount == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning,
-            MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes)
-        {
-            return;
+            ShowNotice($"Draft '{card.DisplayName}' was discarded. Nothing was created in Windows.");
+            return null;
         }
 
         SetBusy(true);
         try
         {
-            var cleanup = await Task.Run(card.Sandbox.Close).ConfigureAwait(true);
-            if (_cards.Contains(card))
+            var cleanup = await Task.Run(sandbox.Close).ConfigureAwait(true);
+            if (cleanup.Completed && _cards.Contains(card))
             {
                 RemoveCard(card);
             }
-
-            if (!cleanup.Completed)
+            else
             {
-                MessageBox.Show(
-                    Window.GetWindow(this),
-                    string.Join(Environment.NewLine + Environment.NewLine, cleanup.Warnings),
-                    "Sandbox closed with incomplete cleanup",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                card.Refresh();
+                if (ReferenceEquals(_loadedCard, card)) { LoadSelectedCard(); }
             }
+
+            ShowNotice(cleanup.Completed
+                ? $"Sandbox '{card.DisplayName}' was closed and cleaned up."
+                : $"Sandbox '{card.DisplayName}' needs cleanup. Select its tab and retry cleanup. " +
+                  string.Join(" ", cleanup.Warnings));
+            return cleanup;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            card.Refresh();
+            if (ReferenceEquals(_loadedCard, card)) { LoadSelectedCard(); }
+            ShowNotice($"Cleanup for '{card.DisplayName}' could not finish. Retry cleanup: {exception.Message}");
+            return null;
         }
         finally
         {
@@ -648,7 +731,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
     }
 
-    private static ExperimentalSandboxOptions BuildSandboxOptions(
+    internal static ExperimentalSandboxOptions BuildSandboxOptions(
         ExperimentalSandboxDraft draft)
     {
         var useAppContainer = draft.UseAppContainer;
@@ -656,7 +739,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         {
             DisplayName = draft.Name.Trim(),
             UseAppContainer = useAppContainer,
-            IntegrityLevel = IntegrityLevel(draft.IntegrityIndex),
+            IntegrityLevel = useAppContainer ? ExperimentalSandboxIntegrityLevel.SystemDefault : IntegrityLevel(draft.IntegrityIndex),
             LeastPrivilege = useAppContainer && draft.LeastPrivilege,
             DisallowWin32kSystemCalls = draft.DisallowWin32k,
             UiRestrictions = BuildUiRestrictions(draft),
@@ -678,7 +761,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         };
     }
 
-    private static ExperimentalSandboxLaunchOptions BuildLaunchOptions(
+    internal static ExperimentalSandboxLaunchOptions BuildLaunchOptions(
         ExperimentalSandboxDraft draft) =>
         new(draft.ExecutablePath)
         {
@@ -694,10 +777,10 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
 
     private bool ValidateLaunchDraft(ExperimentalSandboxDraft draft)
     {
-        var support = _manager.Support;
-        if (!support.IsAvailable)
+        var support = _manager?.Support;
+        if (support?.IsAvailable != true)
         {
-            ShowNotice(support.Summary);
+            ShowNotice(support?.Summary ?? "Sandbox support has not been checked yet.");
             return false;
         }
 
@@ -708,33 +791,10 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(draft.ExecutablePath))
+        if (!SandboxLaunchValidation.ValidatePaths(
+            draft.ExecutablePath, draft.WorkingDirectory,
+            ExecutablePathTextBox, WorkingDirectoryTextBox, ShowNotice))
         {
-            ShowNotice("Choose an executable to launch.");
-            ExecutablePathTextBox.Focus();
-            return false;
-        }
-
-        try
-        {
-            if (!File.Exists(Path.GetFullPath(draft.ExecutablePath)))
-            {
-                ShowNotice("The selected executable no longer exists.");
-                ExecutablePathTextBox.Focus();
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(draft.WorkingDirectory) &&
-                !Directory.Exists(Path.GetFullPath(draft.WorkingDirectory)))
-            {
-                ShowNotice("The selected working directory no longer exists.");
-                WorkingDirectoryTextBox.Focus();
-                return false;
-            }
-        }
-        catch (Exception exception)
-        {
-            ShowNotice($"The launch path is invalid: {exception.Message}");
             return false;
         }
 
@@ -842,10 +902,11 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
 
             if (eventArgs.Closed)
             {
-                if (_cards.Contains(card))
+                if (sandbox.CleanupCompleted && _cards.Contains(card))
                 {
                     RemoveCard(card);
                 }
+                else { card.Refresh(); if (ReferenceEquals(_loadedCard, card)) { LoadSelectedCard(); } }
 
                 return;
             }
@@ -858,19 +919,6 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         });
     }
 
-    private void ShowLaunchResult(
-        ExperimentalSandboxLaunchResult launch,
-        string successMessage)
-    {
-        var message = successMessage;
-        if (launch.Warnings.Count > 0)
-        {
-            message += " " + string.Join(" ", launch.Warnings);
-        }
-
-        ShowNotice(message);
-    }
-
     private static void SyncEffectiveRulesToDraft(ExperimentalSandboxCard card)
     {
         var snapshot = card.Snapshot;
@@ -880,6 +928,7 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         card.Draft.Name = snapshot.DisplayName;
+        if (!snapshot.Options.UseAppContainer) { return; }
         card.Draft.FileRules.Clear();
         foreach (var rule in snapshot.Options.FileSystemRules)
         {
@@ -902,12 +951,13 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         }
 
         var oldIndex = _cards.IndexOf(card);
+        var wasSelected = ReferenceEquals(SandboxList.SelectedItem, card);
         _cards.Remove(card);
-        if (_cards.Count > 0)
+        if (wasSelected && _cards.Count > 0)
         {
             SandboxList.SelectedIndex = Math.Clamp(oldIndex, 0, _cards.Count - 1);
         }
-        else
+        else if (_cards.Count == 0)
         {
             SandboxList.SelectedItem = null;
             _loadedCard = null;
@@ -962,11 +1012,11 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
                         feature.Priority))) + ".";
 
         EmptySandboxListHint.Text = support.IsAvailable
-            ? "Choose New sandbox to begin a policy draft."
+            ? "Choose + to begin a policy draft."
             : "Windows does not currently advertise experimental process " +
               "sandbox creation.";
         var unavailableTip = support.IsAvailable ? null : support.Summary;
-        NewSandboxButton.ToolTip = unavailableTip;
+        SandboxList.NewToolTip = unavailableTip ?? "New experimental sandbox";
         EmptyNewSandboxButton.ToolTip = unavailableTip;
 
         if (FileSystemAccessComboBox.Items.Count > 2 &&
@@ -1041,14 +1091,17 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
     private void UpdateActionState()
     {
         var hasSelection = _loadedCard is not null;
-        var canCreate = !_isBusy && _manager.Support.IsAvailable;
-        NewSandboxButton.IsEnabled = canCreate;
+        var canCreate = !_isBusy && _manager?.Support.IsAvailable == true;
+        SandboxList.IsNewEnabled = canCreate;
         EmptyNewSandboxButton.IsEnabled = canCreate;
         CreateAndLaunchButton.IsEnabled =
-            !_isBusy && hasSelection && _manager.Support.IsAvailable;
+            canCreate && hasSelection && _loadedCard?.NeedsCleanup != true;
         CloseSandboxButton.IsEnabled = !_isBusy && hasSelection;
         ResetDraftButton.IsEnabled =
             !_isBusy && _loadedCard is { IsActive: false };
+        SandboxEditorScrollViewer.IsEnabled = !_isBusy && _loadedCard?.NeedsCleanup != true;
+        PolicyEditor.IsEnabled = !_isBusy && _loadedCard?.IsActive != true;
+        EnvironmentModeComboBox.IsEnabled = !_isBusy && _loadedCard?.IsActive != true;
     }
 
     private void UpdateEmptyStates()
@@ -1133,6 +1186,44 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
         WorkspaceNotice.Visibility = Visibility.Visible;
     }
 
+    internal void AddPendingCleanupCards(ExperimentalSandboxCard draftCard)
+    {
+        foreach (var sandbox in _manager?.Sandboxes ?? [])
+        {
+            if (!sandbox.IsClosed || sandbox.CleanupCompleted || _cards.Any(card => ReferenceEquals(card.Sandbox, sandbox))) { continue; }
+            var card = draftCard.Sandbox is null &&
+                       string.Equals(draftCard.Draft.Name.Trim(), sandbox.DisplayName, StringComparison.Ordinal)
+                ? draftCard
+                : new ExperimentalSandboxCard(sandbox.DisplayName);
+            card.Attach(sandbox);
+            sandbox.Changed += SandboxChanged;
+            if (!_cards.Contains(card)) { _cards.Add(card); }
+            SandboxList.SelectedItem = card;
+            LoadSelectedCard();
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> CloseAllAsync()
+    {
+        if (_initializationTask is { } initialization) { await initialization.ConfigureAwait(true); }
+        if (_manager is not { } manager) { return []; }
+        SetBusy(true);
+        try
+        {
+            var results = await Task.Run(manager.CloseAll).ConfigureAwait(true);
+            foreach (var card in _cards.ToArray())
+            {
+                if (card.Sandbox?.CleanupCompleted == true) { RemoveCard(card); }
+                else { card.Refresh(); }
+            }
+            if (_loadedCard is not null) { LoadSelectedCard(); }
+            return results.Where(result => !result.Completed)
+                .SelectMany(result => result.Warnings.Select(warning => $"Experimental sandbox '{result.DisplayName}': {warning}"))
+                .ToArray();
+        }
+        finally { if (!_disposed) { SetBusy(false); } }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -1149,6 +1240,6 @@ public sealed partial class ExperimentalSandboxWorkspaceView : UserControl, IDis
             }
         }
 
-        _manager.Dispose();
+        _manager?.Dispose();
     }
 }

@@ -9,7 +9,7 @@ internal sealed class AppContainerIdentity
     private const int ErrorFileNotFoundHresult = unchecked((int)0x80070002);
     private const int ErrorNotFoundHresult = unchecked((int)0x80070490);
 
-    private AppContainerIdentity(string profileName, string sid, byte[] sidBytes)
+    internal AppContainerIdentity(string profileName, string sid, byte[] sidBytes)
     {
         ProfileName = profileName;
         Sid = sid;

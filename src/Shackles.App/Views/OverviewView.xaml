@@ -3,6 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer Padding="16" VerticalScrollBarVisibility="Auto">
         <StackPanel>
+            <GroupBox Header="Configured settings" Style="{StaticResource EditorGroupStyle}">
+                <TextBox Text="{Binding RestrictionSummary, Mode=OneWay}"
+                         IsReadOnly="True" TextWrapping="Wrap" MaxHeight="140"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                         Background="Transparent" BorderThickness="0" Padding="0" MinHeight="0"
+                         AutomationProperties.Name="Configured Job Object settings" />
+            </GroupBox>
             <UniformGrid Columns="3" Margin="0,0,0,14">
                 <Border Margin="0,0,8,0" Style="{StaticResource CardBorderStyle}">
                     <StackPanel>

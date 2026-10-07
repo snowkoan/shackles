@@ -1,4 +1,5 @@
 using System.Text;
+using Shackles.Internal;
 
 namespace Shackles.JobObjects.Internal;
 
@@ -8,7 +9,7 @@ internal static class WindowsCommandLine
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var result = new StringBuilder();
-        AppendQuotedArgument(result, executablePath);
+        WindowsArgumentQuoting.AppendQuotedArgument(result, executablePath);
 
         foreach (var argument in arguments)
         {
@@ -19,7 +20,7 @@ internal static class WindowsCommandLine
             }
 
             result.Append(' ');
-            AppendQuotedArgument(result, argument);
+            WindowsArgumentQuoting.AppendQuotedArgument(result, argument);
         }
 
         if (result.Length > 32_766)
@@ -28,37 +29,5 @@ internal static class WindowsCommandLine
         }
 
         return result.ToString();
-    }
-
-    // This is the inverse of CommandLineToArgvW/MSVC parsing. The process is launched directly,
-    // without cmd.exe or PowerShell, so metacharacters never become shell syntax.
-    private static void AppendQuotedArgument(StringBuilder output, string value)
-    {
-        output.Append('"');
-        var backslashes = 0;
-
-        foreach (var character in value)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            if (character == '"')
-            {
-                output.Append('\\', (backslashes * 2) + 1);
-                output.Append('"');
-                backslashes = 0;
-                continue;
-            }
-
-            output.Append('\\', backslashes);
-            backslashes = 0;
-            output.Append(character);
-        }
-
-        output.Append('\\', backslashes * 2);
-        output.Append('"');
     }
 }

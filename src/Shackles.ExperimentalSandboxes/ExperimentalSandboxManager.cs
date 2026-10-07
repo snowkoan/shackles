@@ -6,12 +6,19 @@ public sealed class ExperimentalSandboxManager : IDisposable
 {
     private readonly object _gate = new();
     private readonly List<ExperimentalSandbox> _sandboxes = [];
+    private readonly Func<ExperimentalSandboxSupport> _probe;
     private ExperimentalSandboxSupport _support;
     private bool _disposed;
 
-    public ExperimentalSandboxManager()
+    public ExperimentalSandboxManager() : this(SandboxSupportProbe.Probe)
     {
-        _support = SandboxSupportProbe.Probe();
+    }
+
+    internal ExperimentalSandboxManager(Func<ExperimentalSandboxSupport> probe)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+        _probe = probe;
+        _support = probe();
     }
 
     public ExperimentalSandboxSupport Support
@@ -39,7 +46,7 @@ public sealed class ExperimentalSandboxManager : IDisposable
     public ExperimentalSandboxSupport RefreshSupport()
     {
         ThrowIfDisposed();
-        var support = SandboxSupportProbe.Probe();
+        var support = _probe();
         lock (_gate)
         {
             ThrowIfDisposed();
@@ -72,6 +79,7 @@ public sealed class ExperimentalSandboxManager : IDisposable
         }
         catch (Exception exception)
         {
+            TrackSandbox(sandbox);
             var cleanup = sandbox.Close();
             if (!cleanup.Completed)
             {
@@ -93,26 +101,47 @@ public sealed class ExperimentalSandboxManager : IDisposable
 
     public void Dispose()
     {
+        lock (_gate)
+        {
+            _disposed = true;
+        }
+
+        _ = CloseAll();
+    }
+
+    public IReadOnlyList<ExperimentalSandboxCleanupResult> CloseAll()
+    {
         ExperimentalSandbox[] sandboxes;
         lock (_gate)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
             sandboxes = _sandboxes.ToArray();
-            _sandboxes.Clear();
-            foreach (var sandbox in sandboxes)
+        }
+
+        var results = new List<ExperimentalSandboxCleanupResult>();
+        foreach (var sandbox in sandboxes)
+        {
+            try
             {
-                sandbox.Changed -= SandboxChanged;
+                results.Add(sandbox.Close());
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                results.Add(new ExperimentalSandboxCleanupResult(sandbox.DisplayName, false, [exception.Message]));
             }
         }
 
-        foreach (var sandbox in sandboxes)
+        return results;
+    }
+
+    internal void TrackSandbox(ExperimentalSandbox sandbox)
+    {
+        lock (_gate)
         {
-            sandbox.Dispose();
+            if (!_sandboxes.Contains(sandbox))
+            {
+                _sandboxes.Add(sandbox);
+                sandbox.Changed += SandboxChanged;
+            }
         }
     }
 
@@ -120,7 +149,7 @@ public sealed class ExperimentalSandboxManager : IDisposable
         object? sender,
         ExperimentalSandboxChangedEventArgs eventArgs)
     {
-        if (!eventArgs.Closed || sender is not ExperimentalSandbox sandbox)
+        if (!eventArgs.Closed || sender is not ExperimentalSandbox sandbox || !sandbox.CleanupCompleted)
         {
             return;
         }

@@ -264,16 +264,24 @@ public sealed class WespSession : IDisposable
         {
             ThrowIfClosed();
             RemoveExitedProcesses();
-            if (_processes.Any(process =>
+            var existing = _processes.FirstOrDefault(process =>
                     process.ProcessId == processId &&
-                    process.CreationTimeFileTimeUtc == creationTimeUtcFileTime &&
-                    process.IsRunning))
+                    process.CreationTimeFileTimeUtc == creationTimeUtcFileTime);
+            if (existing is not null)
             {
-                return new WespApplyProcessResult(
-                    processId,
-                    creationTimeUtcFileTime,
-                    WespApplyProcessStatus.AlreadyApplied,
-                    ErrorMessage: null);
+                var info = existing.GetInfo();
+                if (info.IsRunning || info.IsStateUnknown)
+                {
+                    return new WespApplyProcessResult(
+                        processId,
+                        creationTimeUtcFileTime,
+                        info.IsStateUnknown ? WespApplyProcessStatus.Failed : WespApplyProcessStatus.AlreadyApplied,
+                        info.StateError);
+                }
+
+                // A process can exit between the sweep and this identity lookup.
+                existing.Dispose();
+                _processes.Remove(existing);
             }
 
             try
@@ -361,36 +369,10 @@ public sealed class WespSession : IDisposable
             }
 
             _closeRequested = true;
-            foreach (var process in _processes.Where(process =>
-                         process.Origin == WespProcessOrigin.Launched))
+            var processError = WespTrackedProcessCleanup.Close(_processes);
+            if (processError is not null)
             {
-                process.RequestTermination();
-            }
-
-            var terminationDeadline = Environment.TickCount64 + 2000;
-            foreach (var process in _processes.Where(process =>
-                         process.Origin == WespProcessOrigin.Launched))
-            {
-                var remaining = Math.Max(0, terminationDeadline - Environment.TickCount64);
-                process.WaitForExit(checked((uint)remaining));
-            }
-
-            for (var index = _processes.Count - 1; index >= 0; index--)
-            {
-                if (_processes[index].Origin == WespProcessOrigin.Attached ||
-                    !_processes[index].IsRunning)
-                {
-                    _processes[index].Dispose();
-                    _processes.RemoveAt(index);
-                }
-            }
-
-            if (_processes.Count != 0)
-            {
-                return new WespException(
-                    WespOperation.CloseSession,
-                    $"Windows did not terminate {string.Join(", ", _processes.Select(process => $"PID {process.ProcessId}"))}. " +
-                    "The WESP rules remain active; close those processes and retry closing the session.");
+                return processError;
             }
 
             WespException? error = null;
@@ -444,14 +426,7 @@ public sealed class WespSession : IDisposable
 
     private void RemoveExitedProcesses()
     {
-        for (var index = _processes.Count - 1; index >= 0; index--)
-        {
-            if (!_processes[index].IsRunning)
-            {
-                _processes[index].Dispose();
-                _processes.RemoveAt(index);
-            }
-        }
+        WespTrackedProcessCleanup.RemoveConfirmedExits(_processes);
     }
 
     private static void CaptureFailure(int hresult, string detail, ref WespException? error)

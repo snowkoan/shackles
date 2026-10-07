@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using Shackles.AppContainers.Interop;
+using Shackles.Internal;
 
 namespace Shackles.AppContainers.Internal;
 
@@ -41,7 +41,7 @@ internal static class AppContainerLauncher
         }
 
         var commandLine = string.Concat(
-            QuoteArgument(executablePath),
+            WindowsArgumentQuoting.QuoteArgument(executablePath),
             string.IsNullOrWhiteSpace(arguments) ? string.Empty : " " + arguments);
         var mutableCommandLine = string.Concat(commandLine, '\0').ToCharArray();
 
@@ -341,37 +341,6 @@ internal static class AppContainerLauncher
         var allocation = Marshal.AllocHGlobal(bytes.Length);
         Marshal.Copy(bytes, 0, allocation, bytes.Length);
         return allocation;
-    }
-
-    private static string QuoteArgument(string value)
-    {
-        var result = new StringBuilder(value.Length + 2);
-        result.Append('"');
-        var backslashes = 0;
-        foreach (var character in value)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            if (character == '"')
-            {
-                result.Append('\\', checked((backslashes * 2) + 1));
-                result.Append('"');
-                backslashes = 0;
-                continue;
-            }
-
-            result.Append('\\', backslashes);
-            result.Append(character);
-            backslashes = 0;
-        }
-
-        result.Append('\\', checked(backslashes * 2));
-        result.Append('"');
-        return result.ToString();
     }
 
     private static long ReadCreationTime(SafeProcessHandle process)

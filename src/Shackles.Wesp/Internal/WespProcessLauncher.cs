@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Text;
+using Shackles.Internal;
 using Shackles.Wesp.Interop;
 
 namespace Shackles.Wesp.Internal;
@@ -136,36 +136,7 @@ internal static class WespProcessLauncher
         }
     }
 
-    internal static string QuoteArgument(string value)
-    {
-        var result = new StringBuilder(value.Length + 2);
-        result.Append('"');
-        var backslashes = 0;
-        foreach (var character in value)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            if (character == '"')
-            {
-                result.Append('\\', checked((backslashes * 2) + 1));
-                result.Append('"');
-                backslashes = 0;
-                continue;
-            }
-
-            result.Append('\\', backslashes);
-            result.Append(character);
-            backslashes = 0;
-        }
-
-        result.Append('\\', checked(backslashes * 2));
-        result.Append('"');
-        return result.ToString();
-    }
+    internal static string QuoteArgument(string value) => WindowsArgumentQuoting.QuoteArgument(value);
 
     private static WespException FromWin32(WespOperation operation, string detail)
     {

@@ -18,6 +18,7 @@ public sealed class WespExistingProcessAttacherTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void CurrentProcessCanBeOpenedWithItsStableIdentity()
     {
         var creationTime = CaptureCurrentProcessCreationTime();
@@ -39,6 +40,7 @@ public sealed class WespExistingProcessAttacherTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void StaleCreationTimeIsRejectedBeforeWespTagging()
     {
         var creationTime = CaptureCurrentProcessCreationTime();

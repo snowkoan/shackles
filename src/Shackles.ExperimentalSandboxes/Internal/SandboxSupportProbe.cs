@@ -11,6 +11,7 @@ internal static class SandboxSupportProbe
     internal const uint CoreFeatureId = 61389575;
     internal const uint SpecificationFeatureId = 61155944;
     internal const ulong CreateCapability = 0x1;
+    private const int ErrorNotSupported = 50;
     private const int ErrorCallNotImplemented = 120;
     private const int ENotImplemented = unchecked((int)0x80004001);
     private const uint BootFeatureConfiguration = 0;
@@ -122,7 +123,7 @@ internal static class SandboxSupportProbe
                 features);
         }
 
-        if (error is ErrorCallNotImplemented or ENotImplemented)
+        if (IsUnsupportedError(error))
         {
             return Create(
                 ExperimentalSandboxAvailability.FeatureDisabled,
@@ -183,6 +184,9 @@ internal static class SandboxSupportProbe
             capabilityMask,
             probeErrorCode,
             features);
+
+    internal static bool IsUnsupportedError(int error) =>
+        error is ErrorNotSupported or ErrorCallNotImplemented or ENotImplemented;
 
     private static string BuildDisabledSummary(
         ExperimentalFeatureState[] features,

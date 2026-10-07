@@ -96,6 +96,7 @@ public sealed class AppContainerManagerTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void RecoveryIgnoresJournalWithMismatchedSid()
     {
         var directory = CreateTemporaryDirectory();
@@ -188,6 +189,7 @@ public sealed class AppContainerManagerTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void StaleRecoveryRevokesJournaledGrantAndDeletesProfile()
     {
         var root = CreateTemporaryDirectory();
@@ -240,6 +242,7 @@ public sealed class AppContainerManagerTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void CleanupJournalUntrackPersistsTheRemainingIntent()
     {
         var root = CreateTemporaryDirectory();
@@ -282,6 +285,7 @@ public sealed class AppContainerManagerTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void StaleRecoveryClearsJournaledBfsPolicyWithoutRunningBfsCfg()
     {
         var root = CreateTemporaryDirectory();
@@ -319,6 +323,7 @@ public sealed class AppContainerManagerTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void StaleRecoveryRetainsProfileAndJournalWhenBfsClearFails()
     {
         var root = CreateTemporaryDirectory();

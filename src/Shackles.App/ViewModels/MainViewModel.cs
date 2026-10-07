@@ -9,15 +9,18 @@ namespace Shackles.App.ViewModels;
 internal sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly IJobControlService _service;
+    private readonly Func<IReadOnlyList<ProcessEntry>> _readProcesses;
     private int _privateJobNumber;
     private JobViewModel? _selectedJob;
     private string _statusMessage = "Ready";
     private bool _statusIsError;
     private bool _isDisposed;
+    private int _pendingOperations;
 
-    public MainViewModel(IJobControlService service)
+    public MainViewModel(IJobControlService service, Func<IReadOnlyList<ProcessEntry>>? readProcesses = null)
     {
         _service = service;
+        _readProcesses = readProcesses ?? ReadProcesses;
         Capabilities = service.Capabilities;
     }
 
@@ -38,6 +41,7 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool HasSelectedJob => SelectedJob is not null;
+    public bool HasPendingOperations => _pendingOperations != 0;
 
     public string StatusMessage
     {
@@ -58,20 +62,22 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     public async Task<JobViewModel?> CreateJobAsync(string? name)
     {
         ThrowIfDisposed();
+        using var operation = TrackOperation();
         IJobSession? session = null;
         JobViewModel? job = null;
         try
         {
             session = await Task.Run(() => _service.CreateJob(string.IsNullOrWhiteSpace(name) ? null : name.Trim())).ConfigureAwait(true);
+            ThrowIfDisposed();
             var createdNew = session.CreatedNew;
             job = new JobViewModel(session, Capabilities, ++_privateJobNumber);
             session = null;
             Jobs.Add(job);
             SelectedJob = job;
-            await job.InitializeAsync().ConfigureAwait(true);
-            SetStatus(createdNew
+            var successMessage = createdNew
                 ? $"Created {job.DisplayName}."
-                : $"Opened existing job {job.DisplayName}; the name already existed.", false);
+                : $"Opened existing job {job.DisplayName}; the name already existed.";
+            await InitializeOpenedJobAsync(job, successMessage).ConfigureAwait(true);
             return job;
         }
         catch (Exception ex)
@@ -85,6 +91,7 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     public async Task<JobViewModel?> OpenJobAsync(string name)
     {
         ThrowIfDisposed();
+        using var operation = TrackOperation();
         LastOpenJobErrorMessage = null;
         var normalized = name.Trim();
         var existing = Jobs.FirstOrDefault(job => string.Equals(job.DisplayName, normalized, StringComparison.Ordinal));
@@ -100,12 +107,12 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             session = await Task.Run(() => _service.OpenJob(normalized)).ConfigureAwait(true);
+            ThrowIfDisposed();
             job = new JobViewModel(session, Capabilities, ++_privateJobNumber);
             session = null;
             Jobs.Add(job);
             SelectedJob = job;
-            await job.InitializeAsync().ConfigureAwait(true);
-            SetStatus($"Opened named job {job.DisplayName}.", false);
+            await InitializeOpenedJobAsync(job, $"Opened named job {job.DisplayName}.").ConfigureAwait(true);
             return job;
         }
         catch (Exception ex)
@@ -145,8 +152,15 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         {
             SelectedJob = target;
             var result = await target.LaunchProcessAsync(request).ConfigureAwait(true);
-            SetStatus(target.LastOperationMessage, false);
-            await RefreshProcessesAsync().ConfigureAwait(true);
+            var launchMessage = target.LastOperationMessage;
+            if (await RefreshProcessesAsync().ConfigureAwait(true))
+            {
+                SetStatus(launchMessage, false);
+            }
+            else
+            {
+                SetStatus($"{launchMessage} {StatusMessage}", false);
+            }
             return result;
         }
         catch (Exception ex)
@@ -156,30 +170,41 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void CloseJob(JobViewModel job)
+    public bool CloseJob(JobViewModel job)
     {
         ThrowIfDisposed();
         var wasSelected = ReferenceEquals(job, SelectedJob);
-        if (!Jobs.Remove(job))
+        var index = Jobs.IndexOf(job);
+        if (index < 0)
         {
-            return;
+            return true;
         }
 
-        job.Dispose();
+        try { job.Dispose(); }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not close {job.DisplayName}: {ToUserMessage(ex)} The handle is retained; retry closing it.", true);
+            return false;
+        }
+
+        Jobs.Remove(job);
         if (wasSelected)
         {
-            SelectedJob = Jobs.FirstOrDefault();
+            SelectedJob = Jobs.Count == 0 ? null : Jobs[Math.Min(index, Jobs.Count - 1)];
         }
 
         SetStatus($"Closed the app's handle to {job.DisplayName}.", false);
+        return true;
     }
 
     public async Task<bool> RefreshProcessesAsync()
     {
         ThrowIfDisposed();
+        using var operation = TrackOperation();
         try
         {
-            var entries = await Task.Run(ReadProcesses).ConfigureAwait(true);
+            var entries = await Task.Run(_readProcesses).ConfigureAwait(true);
+            ThrowIfDisposed();
             Processes.Clear();
             foreach (var entry in entries)
             {
@@ -196,7 +221,7 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private IReadOnlyList<ProcessEntry> ReadProcesses()
+    private List<ProcessEntry> ReadProcesses()
     {
         var currentId = Environment.ProcessId;
         var result = new List<ProcessEntry>();
@@ -262,6 +287,19 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         StatusIsError = isError;
     }
 
+    private async Task InitializeOpenedJobAsync(JobViewModel job, string successMessage)
+    {
+        try
+        {
+            await job.InitializeAsync().ConfigureAwait(true);
+            SetStatus(successMessage, false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"{successMessage} Its state could not be read: {ToUserMessage(ex)} Refresh the job to verify its settings.", false);
+        }
+    }
+
     private void CleanupFailedInitialization(JobViewModel? job, IJobSession? session)
     {
         if (job is not null)
@@ -287,6 +325,42 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_isDisposed, this);
 
+    private OperationScope TrackOperation()
+    {
+        _pendingOperations++;
+        OnPropertyChanged(nameof(HasPendingOperations));
+        return new OperationScope(() =>
+        {
+            _pendingOperations--;
+            OnPropertyChanged(nameof(HasPendingOperations));
+        });
+    }
+
+    private sealed class OperationScope(Action finish) : IDisposable
+    {
+        public void Dispose() => finish();
+    }
+
+    public async Task<IReadOnlyList<string>> CloseAllAsync()
+    {
+        var warnings = new List<string>();
+        foreach (var job in Jobs.ToArray())
+        {
+            try
+            {
+                await Task.Run(job.Dispose).ConfigureAwait(true);
+                Jobs.Remove(job);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"{job.DisplayName}: {ToUserMessage(ex)}");
+            }
+        }
+
+        SelectedJob = Jobs.FirstOrDefault();
+        return warnings;
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -294,13 +368,25 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _isDisposed = true;
+        var errors = new List<Exception>();
         foreach (var job in Jobs.ToArray())
         {
-            job.Dispose();
+            try { job.Dispose(); Jobs.Remove(job); }
+            catch (Exception ex) { errors.Add(ex); }
         }
 
-        Jobs.Clear();
-        _service.Dispose();
+        SelectedJob = Jobs.FirstOrDefault();
+        if (Jobs.Count == 0)
+        {
+            try { _service.Dispose(); }
+            catch (Exception ex) { errors.Add(ex); }
+        }
+
+        if (errors.Count != 0)
+        {
+            throw new AggregateException("Some Job Object resources could not be closed. Retry cleanup.", errors);
+        }
+
+        _isDisposed = true;
     }
 }

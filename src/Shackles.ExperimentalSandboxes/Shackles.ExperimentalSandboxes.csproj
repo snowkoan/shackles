@@ -10,6 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Shared\WindowsArgumentQuoting.cs" Link="Internal\WindowsArgumentQuoting.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Google.FlatBuffers" Version="25.2.10" />
   </ItemGroup>
 

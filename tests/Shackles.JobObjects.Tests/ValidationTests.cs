@@ -19,6 +19,7 @@ public sealed class ValidationTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void CpuModesRequireTheirPayloads()
     {
         using var job = JobObject.Create();
@@ -42,6 +43,7 @@ public sealed class ValidationTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void StaleProcessIdentityIsRefusedWithoutAssigning()
     {
         using var job = JobObject.Create();
@@ -63,6 +65,7 @@ public sealed class ValidationTests
     }
 
     [TestMethod]
+    [TestCategory("WindowsIntegration")]
     public void PerProcessorCpuCapsAreSurfacedButCannotBeRequested()
     {
         var native = new NativeCpuRateControlInformation

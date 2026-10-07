@@ -10,10 +10,12 @@ public sealed class AppContainerSandbox : IDisposable
     private readonly IReadOnlyList<byte[]> _capabilitySids;
     private readonly CleanupJournal _journal;
     private readonly IBrokeredFileSystemConfigurator _brokeredFileSystem;
+    private readonly Func<string, string?> _deleteProfile;
     private readonly List<TrackedAclGrant> _aclGrants = [];
     private readonly List<TrackedAclGrant> _brokeredFileSystemGrants = [];
     private readonly List<TrackedAppContainerProcess> _processes = [];
     private bool _brokeredFileSystemPolicyMayExist;
+    private bool _profileDeleted;
     private bool _closed;
     private bool _closing;
     private AppContainerCleanupResult? _cleanupResult;
@@ -23,13 +25,15 @@ public sealed class AppContainerSandbox : IDisposable
         IReadOnlyList<byte[]> capabilitySids,
         AppContainerSandboxOptions options,
         CleanupJournal journal,
-        IBrokeredFileSystemConfigurator brokeredFileSystem)
+        IBrokeredFileSystemConfigurator brokeredFileSystem,
+        Func<string, string?>? deleteProfile = null)
     {
         _identity = identity;
         _capabilitySids = capabilitySids;
         Options = options;
         _journal = journal;
         _brokeredFileSystem = brokeredFileSystem;
+        _deleteProfile = deleteProfile ?? AppContainerIdentity.TryDelete;
     }
 
     public event EventHandler<AppContainerSandboxChangedEventArgs>? Changed;
@@ -52,6 +56,19 @@ public sealed class AppContainerSandbox : IDisposable
             }
         }
     }
+
+    public AppContainerCleanupResult? CleanupResult
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _cleanupResult;
+            }
+        }
+    }
+
+    public bool CleanupCompleted => CleanupResult?.Completed == true;
 
     public AppContainerLaunchResult Launch(AppContainerLaunchOptions options)
     {
@@ -129,18 +146,14 @@ public sealed class AppContainerSandbox : IDisposable
         lock (_stateGate)
         {
             closed = _closed;
-            if (closed)
-            {
-                processIds = [];
-            }
-            else
-            {
-                processIds = _processes
+            processIds = _processes
                     .Where(process =>
                     {
                         try
                         {
-                            return !process.HasExited;
+                            // Close owns the process waits. Keep its remaining
+                            // handles visible without blocking a UI snapshot.
+                            return _closing || !process.HasExited;
                         }
                         catch
                         {
@@ -149,7 +162,6 @@ public sealed class AppContainerSandbox : IDisposable
                     })
                     .Select(process => process.ProcessId)
                     .ToArray();
-            }
         }
 
         return new AppContainerSnapshot(
@@ -169,14 +181,14 @@ public sealed class AppContainerSandbox : IDisposable
             TrackedAppContainerProcess[] processes;
             lock (_stateGate)
             {
-                if (_cleanupResult is not null)
+                if (_cleanupResult is { Completed: true })
                 {
                     return _cleanupResult;
                 }
 
                 _closing = true;
+                _closed = true;
                 processes = _processes.ToArray();
-                _processes.Clear();
             }
 
             var warnings = new List<string>();
@@ -198,19 +210,25 @@ public sealed class AppContainerSandbox : IDisposable
                 }
             }
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            var deadline = Environment.TickCount64 + 3000;
             foreach (var process in processes)
             {
                 try
                 {
-                    var remaining = deadline - DateTime.UtcNow;
-                    if (remaining > TimeSpan.Zero &&
-                        !process.WaitForExit(remaining))
+                    var remaining = TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64));
+                    if (!process.WaitForExit(remaining))
                     {
                         warnings.Add(
                             $"Directly launched PID {process.ProcessId} did not " +
-                            "exit before cleanup continued.");
+                            "exit before cleanup stopped. Retry cleanup after it exits.");
+                        continue;
                     }
+
+                    lock (_stateGate)
+                    {
+                        _processes.Remove(process);
+                    }
+                    process.Dispose();
                 }
                 catch (Exception exception)
                 {
@@ -218,27 +236,50 @@ public sealed class AppContainerSandbox : IDisposable
                         $"Could not confirm that directly launched PID " +
                         $"{process.ProcessId} exited: {exception.Message}");
                 }
-                finally
-                {
-                    process.Dispose();
-                }
             }
 
-            var canDeleteProfile = ReleaseResourcePolicy(warnings);
-
-            if (canDeleteProfile)
+            bool hasRemainingProcesses;
+            lock (_stateGate)
             {
-                var profileWarning = AppContainerIdentity.TryDelete(ProfileName);
-                if (profileWarning is not null)
+                hasRemainingProcesses = _processes.Count != 0;
+            }
+            var canDeleteProfile = false;
+            if (!hasRemainingProcesses)
+            {
+                try
                 {
-                    warnings.Add(profileWarning);
+                    canDeleteProfile = ReleaseResourcePolicy(warnings);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    warnings.Add($"Resource cleanup could not complete: {exception.Message}");
                 }
             }
-            else
+
+            if (canDeleteProfile && !_profileDeleted)
+            {
+                try
+                {
+                    var profileWarning = _deleteProfile(ProfileName);
+                    if (profileWarning is not null)
+                    {
+                        warnings.Add(profileWarning);
+                    }
+                    else
+                    {
+                        _profileDeleted = true;
+                    }
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    warnings.Add($"The Windows profile could not be deleted: {exception.Message}");
+                }
+            }
+            else if (!canDeleteProfile && !_profileDeleted)
             {
                 warnings.Add(
                     $"The AppContainer profile '{ProfileName}' was retained so " +
-                    "Brokered File System cleanup can be retried on the next run.");
+                    "cleanup can be retried.");
             }
 
             if (warnings.Count == 0)
@@ -261,7 +302,6 @@ public sealed class AppContainerSandbox : IDisposable
                 warnings);
             lock (_stateGate)
             {
-                _closed = true;
                 _closing = false;
                 _cleanupResult = result;
             }
@@ -381,11 +421,11 @@ public sealed class AppContainerSandbox : IDisposable
             var warning = _brokeredFileSystem.TryClearPolicy(ProfileName);
             if (warning is null)
             {
-                _brokeredFileSystemPolicyMayExist = false;
-                _brokeredFileSystemGrants.Clear();
                 try
                 {
                     _journal.MarkBrokeredFileSystemPolicyCleared();
+                    _brokeredFileSystemPolicyMayExist = false;
+                    _brokeredFileSystemGrants.Clear();
                 }
                 catch (Exception exception)
                 {
@@ -414,10 +454,10 @@ public sealed class AppContainerSandbox : IDisposable
                 continue;
             }
 
-            _aclGrants.RemoveAt(index);
             try
             {
                 _journal.Untrack(grant);
+                _aclGrants.RemoveAt(index);
             }
             catch (Exception exception)
             {
@@ -427,7 +467,7 @@ public sealed class AppContainerSandbox : IDisposable
             }
         }
 
-        return canDeleteProfile;
+        return canDeleteProfile && _aclGrants.Count == 0;
     }
 
     private static bool IsSystemManagedDirectory(string path)
@@ -459,10 +499,10 @@ public sealed class AppContainerSandbox : IDisposable
             var releaseResourcePolicy = false;
             lock (_stateGate)
             {
-                if (!_closing && !_closed)
+                if (!_closing)
                 {
                     removed = _processes.Remove(process);
-                    releaseResourcePolicy = removed && _processes.Count == 0;
+                    releaseResourcePolicy = removed && _processes.Count == 0 && !_closed;
                 }
             }
 

@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
+using System.Windows.Input;
 using Microsoft.Win32;
+using Shackles.App.Controls;
+using Shackles.App.Infrastructure;
 using Shackles.App.Models;
 using Shackles.AppContainers;
 
@@ -12,21 +14,41 @@ namespace Shackles.App.Views;
 public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 {
     private readonly ObservableCollection<AppContainerSandboxCard> _cards = [];
-    private readonly AppContainerManager _manager;
+    private readonly Func<AppContainerManager> _managerFactory;
+    private readonly Func<string, MessageBoxImage, bool> _confirmSandboxClose;
+    private readonly Action<IReadOnlyList<string>> _reportCleanupWarnings;
+    private AppContainerManager? _manager;
+    private Task? _initializationTask;
     private AppContainerSandboxCard? _loadedCard;
     private bool _isReady;
     private bool _isBusy;
     private bool _hasPreparedInitialDisplay;
     private bool _disposed;
 
-    public AppContainerWorkspaceView()
+    public AppContainerWorkspaceView() : this(static () => new AppContainerManager())
     {
+    }
+
+    internal AppContainerWorkspaceView(
+        Func<AppContainerManager> managerFactory,
+        Func<string, MessageBoxImage, bool>? confirmSandboxClose = null,
+        Action<IReadOnlyList<string>>? reportCleanupWarnings = null)
+    {
+        ArgumentNullException.ThrowIfNull(managerFactory);
+        _managerFactory = managerFactory;
+        _confirmSandboxClose = confirmSandboxClose ?? ((question, image) => MessageBox.Show(
+            Window.GetWindow(this), question, "Close AppContainer sandbox",
+            MessageBoxButton.YesNo, image, MessageBoxResult.No) == MessageBoxResult.Yes);
+        _reportCleanupWarnings = reportCleanupWarnings ?? (warnings => MessageBox.Show(
+            Window.GetWindow(this), string.Join(Environment.NewLine + Environment.NewLine, warnings),
+            "Sandbox closed with incomplete cleanup", MessageBoxButton.OK, MessageBoxImage.Warning));
         InitializeComponent();
         SandboxList.ItemsSource = _cards;
-        _manager = new AppContainerManager();
-        ConfigureBrokeredFileSystemSurface();
+        BrokeredFileSystemRadio.IsEnabled = false;
+        BfsSupportText.Text = "Support will be checked when this workspace opens.";
         _isReady = true;
         UpdateEmptyStates();
+        SetBusy(false);
     }
 
     public bool IsBusy => _isBusy;
@@ -53,11 +75,31 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
 
         _hasPreparedInitialDisplay = true;
-        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        SandboxEditorScrollViewer.ScrollToTop();
+        SandboxSummaryScrollViewer.ScrollToTop();
+        _ = InitializeAsync();
+    }
+
+    internal Task InitializeAsync() => _manager is not null ? Task.CompletedTask :
+        _initializationTask is { IsCompleted: false } pending ? pending :
+        _initializationTask = InitializeCoreAsync();
+
+    private async Task InitializeCoreAsync()
+    {
+        SetBusy(true);
+        ShowNotice("Loading AppContainer support and recovering previous sandbox cleanup…");
+        try
         {
-            SandboxEditorScrollViewer.ScrollToTop();
-            SandboxSummaryScrollViewer.ScrollToTop();
-            var recovery = _manager.RecoveryResult;
+            var manager = await Task.Run(_managerFactory).ConfigureAwait(true);
+            if (_disposed)
+            {
+                await Task.Run(manager.Dispose).ConfigureAwait(true);
+                return;
+            }
+
+            _manager = manager;
+            ConfigureBrokeredFileSystemSurface();
+            var recovery = manager.RecoveryResult;
             if (recovery.RecoveredSessionCount > 0 || recovery.Warnings.Count > 0)
             {
                 var parts = new List<string>();
@@ -69,23 +111,25 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
                 }
 
                 parts.AddRange(recovery.Warnings);
-                MessageBox.Show(
-                    Window.GetWindow(this),
-                    string.Join(Environment.NewLine + Environment.NewLine, parts),
-                    recovery.Warnings.Count == 0
-                        ? "AppContainer cleanup recovered"
-                        : "AppContainer cleanup needs attention",
-                    MessageBoxButton.OK,
-                    recovery.Warnings.Count == 0
-                        ? MessageBoxImage.Information
-                        : MessageBoxImage.Warning);
+                ShowNotice(string.Join(Environment.NewLine, parts));
             }
-        });
+            else { ShowNotice("AppContainer is ready. Start a draft to configure a sandbox."); }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (!_disposed) { ShowNotice($"AppContainer initialization failed: {exception.Message}"); }
+            _initializationTask = null;
+            _hasPreparedInitialDisplay = false;
+        }
+        finally
+        {
+            if (!_disposed) { SetBusy(false); }
+        }
     }
 
     private void NewSandbox_Click(object sender, RoutedEventArgs e)
     {
-        if (_isBusy)
+        if (_isBusy || _manager is null)
         {
             return;
         }
@@ -131,6 +175,19 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
 
         LoadSelectedCard();
+    }
+
+    private void Workspace_PreviewKeyDown(object sender, KeyEventArgs e) =>
+        _ = SandboxList.HandleWorkspaceKeyDown(e);
+
+    private async void SandboxList_CloseRequested(
+        object? sender,
+        InstanceTabCloseRequestedEventArgs e)
+    {
+        if (e.Item is AppContainerSandboxCard card)
+        {
+            await CloseSandboxAsync(card).ConfigureAwait(true);
+        }
     }
 
     private void LoadSelectedCard()
@@ -182,18 +239,22 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
 
         var active = _loadedCard.IsActive;
-        PolicyControlsPanel.IsEnabled = !active;
-        SharedAccessTabs.IsEnabled = !active;
+        PolicyControlsPanel.IsEnabled = !active && !_isBusy;
+        SharedAccessTabs.IsEnabled = !active && !_isBusy;
         ResetDraftButton.IsEnabled = !active && !_isBusy;
-        EditorStateBadgeText.Text = active ? "ACTIVE" : "DRAFT";
+        EditorStateBadgeText.Text = _loadedCard.StateBadge;
         SandboxIdentityText.Text = active
             ? _loadedCard.Sandbox!.Sid
             : "SID allocated on first launch";
+        SandboxIdentityText.ToolTip = SandboxIdentityText.Text;
         CreateAndLaunchButton.Content = active
             ? "_Launch in sandbox"
             : "_Create sandbox and launch";
-        CloseSandboxButton.Content = active ? "_Close sandbox" : "_Discard draft";
+        CloseSandboxButton.Content = _loadedCard.NeedsCleanup
+            ? "_Retry cleanup"
+            : active ? "_Close sandbox" : "_Discard draft";
         RefreshPreview();
+        SetBusy(_isBusy);
     }
 
     private void SaveControlsToDraft()
@@ -239,11 +300,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
 
         SaveControlsToDraft();
-        _loadedCard.RefreshDraft();
-        if (_loadedCard.IsActive)
-        {
-            _loadedCard.Refresh();
-        }
+        _loadedCard.Refresh();
 
         var draft = _loadedCard.Draft;
         var displayName = _loadedCard.IsActive
@@ -340,7 +397,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
     private void ConfigureBrokeredFileSystemSurface()
     {
-        var support = _manager.BrokeredFileSystemSupport;
+        var support = _manager!.BrokeredFileSystemSupport;
         BrokeredFileSystemRadio.IsEnabled = support.IsAvailable;
         BrokeredFileSystemRadio.ToolTip = support.Summary;
         BfsSupportText.Text = support.Summary +
@@ -381,15 +438,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             "change its ACL. Content write access alone is not sufficient.";
     }
 
-    private void PreviewOption_Changed(object sender, RoutedEventArgs e) =>
-        RefreshPreview();
-
-    private void PreviewSelection_Changed(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        RefreshPreview();
-
-    private void PreviewText_Changed(object sender, TextChangedEventArgs e) =>
+    private void Preview_Changed(object sender, RoutedEventArgs e) =>
         RefreshPreview();
 
     private void BrowseExecutable_Click(object sender, RoutedEventArgs e)
@@ -613,7 +662,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
     private async void CreateAndLaunch_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadedCard is null || _isBusy)
+        if (_loadedCard is null || _isBusy || _manager is null || _loadedCard.NeedsCleanup)
         {
             return;
         }
@@ -633,16 +682,18 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
 
         var card = _loadedCard;
+        var manager = _manager;
+        var existingSandbox = card.Sandbox;
+        var sandboxOptions = BuildSandboxOptions(card.Draft);
+        var launchOptions = BuildLaunchOptions(card.Draft);
         SetBusy(true);
         try
         {
             AppContainerLaunchResult launch;
-            if (card.Sandbox is null)
+            if (existingSandbox is null)
             {
-                var sandboxOptions = BuildSandboxOptions(card.Draft);
-                var launchOptions = BuildLaunchOptions(card.Draft);
                 var creation = await Task.Run(
-                    () => _manager.CreateAndLaunch(
+                    () => manager.CreateAndLaunch(
                         sandboxOptions,
                         launchOptions)).ConfigureAwait(true);
                 launch = creation.FirstLaunch;
@@ -651,9 +702,8 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             }
             else
             {
-                var launchOptions = BuildLaunchOptions(card.Draft);
                 launch = await Task.Run(
-                    () => card.Sandbox.Launch(launchOptions)).ConfigureAwait(true);
+                    () => existingSandbox.Launch(launchOptions)).ConfigureAwait(true);
                 card.Refresh();
             }
 
@@ -661,13 +711,16 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             {
                 SandboxList.SelectedItem = card;
                 LoadSelectedCard();
-                ShowLaunchResult(
-                    launch,
-                    $"Launched PID {launch.ProcessId} in sandbox {card.Sandbox!.Sid}.");
+                ShowNotice(
+                    $"Launched PID {launch.ProcessId} in sandbox {card.Sandbox!.Sid}." +
+                    (launch.Warnings.Count > 0 ? " " + string.Join(" ", launch.Warnings) : string.Empty));
             }
         }
         catch (Exception exception)
         {
+            AddPendingCleanupCards(card);
+            var cleanupPending = manager.Sandboxes.Any(
+                sandbox => sandbox.IsClosed && !sandbox.CleanupCompleted);
             var brokeredFileSystemFailure =
                 exception is AppContainerException
                 {
@@ -675,7 +728,9 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
                         AppContainerOperation.ConfigureBrokeredFileSystem
                 };
             ShowNotice(
-                brokeredFileSystemFailure && card.IsActive
+                cleanupPending
+                    ? "Launch failed and cleanup could not finish. The affected sandbox is retained; select Retry cleanup."
+                    : brokeredFileSystemFailure && card.IsActive
                     ? "Launch stopped before process creation. The BFS update may " +
                       "be uncertain; close the sandbox to force policy cleanup."
                     : brokeredFileSystemFailure
@@ -687,7 +742,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             MessageBox.Show(
                 Window.GetWindow(this),
                 exception.Message,
-                card.IsActive
+                existingSandbox is not null
                     ? "Could not launch in sandbox"
                     : "Could not create sandbox",
                 MessageBoxButton.OK,
@@ -706,7 +761,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
     private bool ConfirmBrokeredFileSystemExperiment()
     {
-        var support = _manager.BrokeredFileSystemSupport;
+        var support = _manager!.BrokeredFileSystemSupport;
         var warnings = support.Warnings.Count == 0
             ? string.Empty
             : Environment.NewLine + Environment.NewLine +
@@ -725,12 +780,19 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
     private async void CloseSandbox_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadedCard is null || _isBusy)
+        if (_loadedCard is { } card)
+        {
+            await CloseSandboxAsync(card).ConfigureAwait(true);
+        }
+    }
+
+    internal async Task CloseSandboxAsync(AppContainerSandboxCard card)
+    {
+        if (_disposed || _isBusy || !_cards.Contains(card))
         {
             return;
         }
 
-        var card = _loadedCard;
         if (card.Sandbox is null)
         {
             RemoveCard(card);
@@ -748,14 +810,8 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             : $"Close '{card.DisplayName}'? This terminates {trackedCount} directly launched " +
               $"process{(trackedCount == 1 ? string.Empty : "es")}, removes tracked grants, " +
               "and deletes the Windows profile." + descendantNotice;
-        var answer = MessageBox.Show(
-            Window.GetWindow(this),
-            question,
-            "Close AppContainer sandbox",
-            MessageBoxButton.YesNo,
-            trackedCount == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning,
-            MessageBoxResult.No);
-        if (answer != MessageBoxResult.Yes)
+        if (!_confirmSandboxClose(question,
+                trackedCount == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning))
         {
             return;
         }
@@ -764,16 +820,27 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         try
         {
             var cleanup = await Task.Run(card.Sandbox.Close).ConfigureAwait(true);
-            RemoveCard(card);
+            if (cleanup.Completed)
+            {
+                RemoveCard(card);
+            }
+            else
+            {
+                card.Refresh();
+                if (ReferenceEquals(_loadedCard, card))
+                {
+                    LoadSelectedCard();
+                }
+            }
             if (!cleanup.Completed)
             {
-                MessageBox.Show(
-                    Window.GetWindow(this),
-                    string.Join(Environment.NewLine + Environment.NewLine, cleanup.Warnings),
-                    "Sandbox closed with incomplete cleanup",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                _reportCleanupWarnings(cleanup.Warnings);
             }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            card.Refresh();
+            ShowNotice($"Sandbox cleanup could not finish. Retry cleanup: {exception.Message}");
         }
         finally
         {
@@ -781,7 +848,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         }
     }
 
-    private static AppContainerSandboxOptions BuildSandboxOptions(
+    internal static AppContainerSandboxOptions BuildSandboxOptions(
         AppContainerSandboxDraft draft)
     {
         var capabilities = new List<string>();
@@ -860,7 +927,7 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         };
     }
 
-    private static AppContainerLaunchOptions BuildLaunchOptions(
+    internal static AppContainerLaunchOptions BuildLaunchOptions(
         AppContainerSandboxDraft draft) =>
         new(draft.ExecutablePath)
         {
@@ -884,44 +951,16 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         if (_loadedCard?.IsActive != true &&
             draft.FileSystemPolicyBackend ==
             AppContainerFileSystemPolicyBackend.BrokeredFileSystem &&
-            !_manager.BrokeredFileSystemSupport.IsAvailable)
+            _manager?.BrokeredFileSystemSupport.IsAvailable != true)
         {
-            ShowNotice(_manager.BrokeredFileSystemSupport.Summary);
+            ShowNotice(_manager?.BrokeredFileSystemSupport.Summary ?? "AppContainer support is still loading.");
             BrokeredFileSystemRadio.Focus();
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(draft.ExecutablePath))
-        {
-            ShowNotice("Choose an executable to launch.");
-            ExecutablePathTextBox.Focus();
-            return false;
-        }
-
-        try
-        {
-            if (!File.Exists(Path.GetFullPath(draft.ExecutablePath)))
-            {
-                ShowNotice("The selected executable no longer exists.");
-                ExecutablePathTextBox.Focus();
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(draft.WorkingDirectory) &&
-                !Directory.Exists(Path.GetFullPath(draft.WorkingDirectory)))
-            {
-                ShowNotice("The selected working directory no longer exists.");
-                WorkingDirectoryTextBox.Focus();
-                return false;
-            }
-        }
-        catch (Exception exception)
-        {
-            ShowNotice($"The launch path is invalid: {exception.Message}");
-            return false;
-        }
-
-        return true;
+        return SandboxLaunchValidation.ValidatePaths(
+            draft.ExecutablePath, draft.WorkingDirectory,
+            ExecutablePathTextBox, WorkingDirectoryTextBox, ShowNotice);
     }
 
     private void SandboxChanged(
@@ -949,19 +988,9 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
 
             if (eventArgs.Closed)
             {
-                var cleanup = sandbox.Close();
-                RemoveCard(card);
-                if (!cleanup.Completed)
-                {
-                    MessageBox.Show(
-                        Window.GetWindow(this),
-                        string.Join(
-                            Environment.NewLine + Environment.NewLine,
-                            cleanup.Warnings),
-                        "Automatic sandbox cleanup was incomplete",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
+                card.Refresh();
+                if (sandbox.CleanupCompleted) { RemoveCard(card); }
+                else if (ReferenceEquals(_loadedCard, card)) { LoadSelectedCard(); }
 
                 return;
             }
@@ -996,33 +1025,26 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         });
     }
 
-    private void ShowLaunchResult(
-        AppContainerLaunchResult launch,
-        string successMessage)
-    {
-        var message = successMessage;
-        if (launch.Warnings.Count > 0)
-        {
-            message += " " + string.Join(" ", launch.Warnings);
-        }
-
-        ShowNotice(message);
-    }
-
     private void RemoveCard(AppContainerSandboxCard card)
     {
+        if (!_cards.Contains(card))
+        {
+            return;
+        }
+
         if (card.Sandbox is not null)
         {
             card.Sandbox.Changed -= SandboxChanged;
         }
 
         var oldIndex = _cards.IndexOf(card);
+        var wasSelected = ReferenceEquals(SandboxList.SelectedItem, card);
         _cards.Remove(card);
-        if (_cards.Count > 0)
+        if (wasSelected && _cards.Count > 0)
         {
             SandboxList.SelectedIndex = Math.Clamp(oldIndex, 0, _cards.Count - 1);
         }
-        else
+        else if (_cards.Count == 0)
         {
             SandboxList.SelectedItem = null;
             _loadedCard = null;
@@ -1037,9 +1059,15 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
         OperationProgress.Visibility = busy
             ? Visibility.Visible
             : Visibility.Collapsed;
-        CreateAndLaunchButton.IsEnabled = !busy;
-        CloseSandboxButton.IsEnabled = !busy;
+        CloseSandboxButton.IsEnabled = !busy && _loadedCard is not null;
         SandboxList.IsEnabled = !busy;
+        SandboxList.IsNewEnabled = !busy && _manager is not null;
+        EmptyNewSandboxButton.IsEnabled = !busy && _manager is not null;
+        SandboxEditorScrollViewer.IsEnabled = !busy && _loadedCard?.NeedsCleanup != true;
+        CreateAndLaunchButton.IsEnabled = !busy && _manager is not null &&
+                                         _loadedCard is { NeedsCleanup: false };
+        PolicyControlsPanel.IsEnabled = !busy && _loadedCard?.IsActive != true;
+        SharedAccessTabs.IsEnabled = !busy && _loadedCard?.IsActive != true;
         ResetDraftButton.IsEnabled =
             !busy && _loadedCard is { IsActive: false };
     }
@@ -1047,23 +1075,72 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
     private void UpdateEmptyStates()
     {
         var hasSelection = SandboxList.SelectedItem is AppContainerSandboxCard;
-        EmptySandboxListHint.Visibility = _cards.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
         EmptyEditorState.Visibility = hasSelection
             ? Visibility.Collapsed
             : Visibility.Visible;
         SandboxEditorHost.Visibility = hasSelection
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ResetDraftButton.IsEnabled =
-            !_isBusy && _loadedCard is { IsActive: false };
+        UpdateNoticeVisibility();
+        SetBusy(_isBusy);
     }
 
     private void ShowNotice(string message)
     {
         WorkspaceNoticeText.Text = message;
-        WorkspaceNotice.Visibility = Visibility.Visible;
+        EmptyWorkspaceNoticeText.Text = message.Replace('\r', ' ').Replace('\n', ' ');
+        EmptyWorkspaceNoticeText.ToolTip = message;
+        UpdateNoticeVisibility();
+    }
+
+    private void UpdateNoticeVisibility()
+    {
+        var hasSelection = SandboxList.SelectedItem is AppContainerSandboxCard;
+        var hasNotice = !string.IsNullOrWhiteSpace(WorkspaceNoticeText.Text);
+        EmptyWorkspaceNotice.Visibility = !hasSelection && hasNotice
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        WorkspaceNotice.Visibility = hasSelection && hasNotice
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    internal void AddPendingCleanupCards(AppContainerSandboxCard draftCard)
+    {
+        foreach (var sandbox in _manager?.Sandboxes ?? [])
+        {
+            if (!sandbox.IsClosed || sandbox.CleanupCompleted || _cards.Any(card => ReferenceEquals(card.Sandbox, sandbox))) { continue; }
+            var card = draftCard.Sandbox is null &&
+                       string.Equals(draftCard.Draft.Name.Trim(), sandbox.DisplayName, StringComparison.Ordinal)
+                ? draftCard
+                : new AppContainerSandboxCard(sandbox.DisplayName);
+            card.Attach(sandbox);
+            sandbox.Changed += SandboxChanged;
+            if (!_cards.Contains(card)) { _cards.Add(card); }
+            SandboxList.SelectedItem = card;
+            LoadSelectedCard();
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> CloseAllAsync()
+    {
+        if (_initializationTask is { } initialization) { await initialization.ConfigureAwait(true); }
+        if (_manager is not { } manager) { return []; }
+        SetBusy(true);
+        try
+        {
+            var results = await Task.Run(manager.CloseAll).ConfigureAwait(true);
+            foreach (var card in _cards.ToArray())
+            {
+                if (card.Sandbox?.CleanupCompleted == true) { RemoveCard(card); }
+                else { card.Refresh(); }
+            }
+            if (_loadedCard is not null) { LoadSelectedCard(); }
+            return results.Where(result => !result.Completed)
+                .SelectMany(result => result.Warnings.Select(warning => $"AppContainer '{result.DisplayName}': {warning}"))
+                .ToArray();
+        }
+        finally { if (!_disposed) { SetBusy(false); } }
     }
 
     public void Dispose()
@@ -1082,6 +1159,6 @@ public sealed partial class AppContainerWorkspaceView : UserControl, IDisposable
             }
         }
 
-        _manager.Dispose();
+        _manager?.Dispose();
     }
 }

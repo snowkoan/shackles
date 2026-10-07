@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using Shackles.ExperimentalSandboxes.Interop;
+using Shackles.Internal;
 
 namespace Shackles.ExperimentalSandboxes.Internal;
 
@@ -145,7 +145,7 @@ internal static class SandboxLauncher
         out int error)
     {
         var commandLine = string.Concat(
-            QuoteArgument(executablePath),
+            WindowsArgumentQuoting.QuoteArgument(executablePath),
             string.IsNullOrWhiteSpace(arguments) ? string.Empty : " " + arguments,
             '\0').ToCharArray();
         var startupInfo = new NativeStartupInfo
@@ -249,37 +249,6 @@ internal static class SandboxLauncher
                Path.GetDirectoryName(executablePath) ??
                Path.GetPathRoot(executablePath) ??
                Environment.GetFolderPath(Environment.SpecialFolder.System);
-    }
-
-    private static string QuoteArgument(string value)
-    {
-        var result = new StringBuilder(value.Length + 2);
-        result.Append('"');
-        var backslashes = 0;
-        foreach (var character in value)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            if (character == '"')
-            {
-                result.Append('\\', checked((backslashes * 2) + 1));
-                result.Append('"');
-                backslashes = 0;
-                continue;
-            }
-
-            result.Append('\\', backslashes);
-            result.Append(character);
-            backslashes = 0;
-        }
-
-        result.Append('\\', checked(backslashes * 2));
-        result.Append('"');
-        return result.ToString();
     }
 
     private static long ReadCreationTime(SafeProcessHandle process)

@@ -8,4 +8,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\WindowsArgumentQuoting.cs" Link="Internal\WindowsArgumentQuoting.cs" />
+  </ItemGroup>
 </Project>

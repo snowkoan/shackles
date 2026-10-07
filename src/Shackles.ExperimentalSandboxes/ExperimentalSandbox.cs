@@ -7,6 +7,7 @@ public sealed class ExperimentalSandbox : IDisposable
     private readonly object _operationGate = new();
     private readonly object _stateGate = new();
     private readonly SandboxIdentity _identity;
+    private readonly Func<string?> _deleteProfile;
     private readonly List<TrackedSandboxProcess> _processes = [];
     private ExperimentalSandboxOptions _effectiveOptions;
     private bool _profileMayExist;
@@ -16,10 +17,14 @@ public sealed class ExperimentalSandbox : IDisposable
 
     internal ExperimentalSandbox(
         SandboxIdentity identity,
-        ExperimentalSandboxOptions options)
+        ExperimentalSandboxOptions options,
+        Func<string?>? deleteProfile = null,
+        bool profileMayExist = false)
     {
         _identity = identity;
         _effectiveOptions = options;
+        _deleteProfile = deleteProfile ?? identity.TryDeleteProfile;
+        _profileMayExist = profileMayExist;
     }
 
     public event EventHandler<ExperimentalSandboxChangedEventArgs>? Changed;
@@ -40,6 +45,19 @@ public sealed class ExperimentalSandbox : IDisposable
             }
         }
     }
+
+    public ExperimentalSandboxCleanupResult? CleanupResult
+    {
+        get
+        {
+            lock (_stateGate)
+            {
+                return _cleanupResult;
+            }
+        }
+    }
+
+    public bool CleanupCompleted => CleanupResult?.Completed == true;
 
     public ExperimentalSandboxLaunchResult Launch(
         ExperimentalSandboxLaunchOptions launchOptions)
@@ -111,16 +129,21 @@ public sealed class ExperimentalSandbox : IDisposable
         {
             closed = _closed;
             options = _effectiveOptions;
-            if (closed)
-            {
-                processIds = [];
-            }
-            else
+            if (!_closing)
             {
                 for (var index = _processes.Count - 1; index >= 0; index--)
                 {
                     var process = _processes[index];
-                    if (!process.HasExited)
+                    bool hasExited;
+                    try
+                    {
+                        hasExited = process.HasExited;
+                    }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
+                    {
+                        continue;
+                    }
+                    if (!hasExited)
                     {
                         continue;
                     }
@@ -129,10 +152,9 @@ public sealed class ExperimentalSandbox : IDisposable
                     exited.Add(process);
                 }
 
-                processIds = _processes
-                    .Select(process => process.ProcessId)
-                    .ToArray();
             }
+
+            processIds = _processes.Select(process => process.ProcessId).ToArray();
         }
 
         foreach (var process in exited)
@@ -157,38 +179,52 @@ public sealed class ExperimentalSandbox : IDisposable
             TrackedSandboxProcess[] processes;
             lock (_stateGate)
             {
-                if (_cleanupResult is not null)
+                if (_cleanupResult is { Completed: true })
                 {
                     return _cleanupResult;
                 }
 
                 _closing = true;
+                _closed = true;
                 processes = _processes.ToArray();
-                _processes.Clear();
             }
 
             var warnings = new List<string>();
             foreach (var process in processes)
             {
-                var warning = process.TryTerminate();
-                if (warning is not null)
+                try
                 {
-                    warnings.Add(warning);
+                    var warning = process.TryTerminate();
+                    if (warning is not null)
+                    {
+                        warnings.Add(warning);
+                    }
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    warnings.Add($"Could not terminate directly launched PID {process.ProcessId}: {exception.Message}");
                 }
             }
 
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            var deadline = Environment.TickCount64 + 3000;
             foreach (var process in processes)
             {
                 try
                 {
-                    var remaining = deadline - DateTime.UtcNow;
-                    if (remaining > TimeSpan.Zero && !process.WaitForExit(remaining))
+                    var remaining = TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64));
+                    if (!process.WaitForExit(remaining))
                     {
                         warnings.Add(
                             $"Directly launched PID {process.ProcessId} did not " +
-                            "exit before profile cleanup continued.");
+                            "exit before cleanup stopped. Retry cleanup after it exits.");
+                        continue;
                     }
+
+                    lock (_stateGate)
+                    {
+                        _processes.Remove(process);
+                    }
+                    process.Dispose();
                 }
                 catch (Exception exception)
                 {
@@ -196,19 +232,30 @@ public sealed class ExperimentalSandbox : IDisposable
                         $"Could not confirm that directly launched PID " +
                         $"{process.ProcessId} exited: {exception.Message}");
                 }
-                finally
-                {
-                    process.Dispose();
-                }
             }
 
-            if (_profileMayExist)
+            bool hasRemainingProcesses;
+            lock (_stateGate)
             {
-                var warning = _identity.TryDeleteProfile();
-                if (warning is not null)
+                hasRemainingProcesses = _processes.Count != 0;
+            }
+            if (_profileMayExist && !hasRemainingProcesses)
+            {
+                try
                 {
-                    warnings.Add(
-                        warning + " A descendant may still be using the profile.");
+                    var warning = _deleteProfile();
+                    if (warning is not null)
+                    {
+                        warnings.Add(warning + " A descendant may still be using the profile.");
+                    }
+                    else
+                    {
+                        _profileMayExist = false;
+                    }
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    warnings.Add($"The Windows profile could not be deleted: {exception.Message}");
                 }
             }
 
@@ -218,7 +265,6 @@ public sealed class ExperimentalSandbox : IDisposable
                 warnings);
             lock (_stateGate)
             {
-                _closed = true;
                 _closing = false;
                 _cleanupResult = result;
             }
@@ -283,7 +329,7 @@ public sealed class ExperimentalSandbox : IDisposable
         var removed = false;
         lock (_stateGate)
         {
-            if (!_closing && !_closed)
+            if (!_closing)
             {
                 removed = _processes.Remove(process);
             }

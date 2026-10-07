@@ -23,9 +23,12 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
     private bool _notificationDrainScheduled;
     private string _lastOperationMessage = "Ready";
     private bool _lastOperationFailed;
-    private string _restrictionSummary = "No configured hard limits";
+    private string _restrictionSummary = "Job state has not been read";
     private bool _killOnCloseConfigured;
     private bool _liveNotificationOwnerRequiredOnClose;
+    private long _editorRevision;
+    private bool _isSnapshotStale = true;
+    private bool _hasSnapshot;
 
     public JobViewModel(IJobSession session, JobCapabilitySet capabilities, int privateJobNumber)
     {
@@ -36,13 +39,14 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
         NotificationDeliveryBadge = CanPostEndOfJobNotification ? "OWNED LIVE PORT" : "SAMPLED ONLY";
         NotificationDeliveryDescription = CanPostEndOfJobNotification
             ? "Shackles owns and consumes this job's completion port; PostNotification is safe to select."
-            : "This opened handle does not own a completion port. PostNotification is unavailable because Windows could terminate members instead of posting.";
+            : "This opened handle does not own a completion port. An existing notification action can be preserved, but a new one requires an owned live port. Windows terminates members if the time limit expires without a port.";
         Editor = new RestrictionEditorViewModel(CanPostEndOfJobNotification);
         RefreshCommand = new AsyncRelayCommand(RefreshFromCommandAsync, () => !IsBusy);
-        ApplyCommand = new AsyncRelayCommand(ApplyFromCommandAsync, () => !IsBusy && Editor.IsDirty);
+        ApplyCommand = new AsyncRelayCommand(ApplyFromCommandAsync, () => CanEditDraft && Editor.IsDirty);
         RevertCommand = new AsyncRelayCommand(RevertFromCommandAsync, () => !IsBusy && Editor.IsDirty);
         Editor.DraftChanged += (_, _) =>
         {
+            Interlocked.Increment(ref _editorRevision);
             ApplyCommand.RaiseCanExecuteChanged();
             RevertCommand.RaiseCanExecuteChanged();
         };
@@ -55,7 +59,7 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
     public string NotificationDeliveryBadge { get; }
     public string NotificationDeliveryDescription { get; }
     public string LiveNotificationDescription => CanPostEndOfJobNotification
-        ? "Live Windows job messages received by this handle appear here. This in-memory history is cleared when the job card closes."
+        ? "Live Windows job messages received by this handle appear here. This in-memory history is cleared when the job tab closes."
         : "No live completion-port stream is attached to this opened job. Use the sampled violation state below.";
     public ObservableCollection<JobMemberViewModel> Members { get; } = [];
     public ObservableCollection<LimitViolationDisplay> LimitViolations { get; } = [];
@@ -85,11 +89,35 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _isBusy, value))
             {
+                OnPropertyChanged(nameof(CanEditDraft));
+                OnPropertyChanged(nameof(CanOperate));
                 RefreshCommand.RaiseCanExecuteChanged();
                 ApplyCommand.RaiseCanExecuteChanged();
                 RevertCommand.RaiseCanExecuteChanged();
             }
         }
+    }
+
+    public bool CanEditDraft => !IsBusy && HasSnapshot;
+    public bool CanOperate => !IsBusy;
+
+    public bool HasSnapshot
+    {
+        get => _hasSnapshot;
+        private set
+        {
+            if (SetProperty(ref _hasSnapshot, value))
+            {
+                OnPropertyChanged(nameof(CanEditDraft));
+                ApplyCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsSnapshotStale
+    {
+        get => _isSnapshotStale;
+        private set => SetProperty(ref _isSnapshotStale, value);
     }
 
     public string LastOperationMessage
@@ -126,32 +154,34 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
 
     public async Task<IReadOnlyList<AssignmentOutcome>> AssignProcessesAsync(IReadOnlyCollection<ProcessIdentity> processes)
     {
-        if (processes.Count == 0)
+        var requestedProcesses = processes.ToArray();
+        if (requestedProcesses.Length == 0)
         {
             return Array.Empty<AssignmentOutcome>();
         }
 
         return await RunExclusiveAsync(async () =>
         {
-            var outcomes = await Task.Run(() => _session.AssignProcesses(processes)).ConfigureAwait(true);
+            var outcomes = await Task.Run(() => _session.AssignProcesses(requestedProcesses)).ConfigureAwait(true);
             var successCount = outcomes.Count(item => item.Succeeded);
             LastOperationFailed = successCount != outcomes.Count;
             LastOperationMessage = successCount == outcomes.Count
                 ? $"Assigned {successCount} process{(successCount == 1 ? string.Empty : "es")}."
                 : $"Assigned {successCount} of {outcomes.Count} processes; review the results.";
-            await RefreshCoreAsync(reloadEditor: false).ConfigureAwait(true);
+            await RefreshAfterMutationAsync(reloadEditor: false).ConfigureAwait(true);
             return outcomes;
         }).ConfigureAwait(true);
     }
 
     public async Task<LaunchOutcome> LaunchProcessAsync(LaunchRequest request)
     {
+        var capturedRequest = request with { Arguments = request.Arguments.ToArray() };
         return await RunExclusiveAsync(async () =>
         {
-            var outcome = await Task.Run(() => _session.LaunchProcess(request)).ConfigureAwait(true);
+            var outcome = await Task.Run(() => _session.LaunchProcess(capturedRequest)).ConfigureAwait(true);
             LastOperationFailed = false;
             LastOperationMessage = $"Launched {outcome.ProcessName} (PID {outcome.ProcessId}) inside the job.";
-            await RefreshCoreAsync(reloadEditor: false).ConfigureAwait(true);
+            await RefreshAfterMutationAsync(reloadEditor: false).ConfigureAwait(true);
             return outcome;
         }).ConfigureAwait(true);
     }
@@ -168,21 +198,38 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
         }).ConfigureAwait(true);
     }
 
-    private async Task ApplyAsync()
+    public async Task ApplyAsync()
     {
-        if (!Editor.TryBuild(out var profile))
-        {
-            LastOperationFailed = true;
-            LastOperationMessage = "Correct the validation error before applying changes.";
-            return;
-        }
-
         await RunExclusiveAsync(async () =>
         {
+            if (!HasSnapshot)
+            {
+                LastOperationFailed = true;
+                LastOperationMessage = "Refresh the job successfully before editing or applying its restrictions.";
+                return;
+            }
+
+            if (!Editor.TryBuild(out var profile))
+            {
+                LastOperationFailed = true;
+                LastOperationMessage = "Correct the validation error before applying changes.";
+                return;
+            }
+
+            var editorRevision = Volatile.Read(ref _editorRevision);
+            // A failure can leave earlier native information classes applied. Keep close
+            // warnings conservative until a successful read-back confirms the settings.
+            KillOnCloseConfigured |= profile.HardLimits.KillOnJobClose;
+            LiveNotificationOwnerRequiredOnClose |= RequiresLiveNotificationOwner(profile);
             await Task.Run(() => _session.ApplyRestrictions(profile)).ConfigureAwait(true);
-            await RefreshCoreAsync(reloadEditor: true).ConfigureAwait(true);
             LastOperationFailed = false;
-            LastOperationMessage = "Restrictions applied and read back from Windows.";
+            LastOperationMessage = "Restrictions accepted by Windows.";
+            if (await RefreshAfterMutationAsync(reloadEditor: true, editorRevision).ConfigureAwait(true))
+            {
+                LastOperationMessage = Editor.IsDirty
+                    ? "Restrictions applied and read back from Windows. Newer unsaved edits were preserved."
+                    : "Restrictions applied and read back from Windows.";
+            }
         }).ConfigureAwait(true);
     }
 
@@ -227,12 +274,7 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
     {
         try
         {
-            await RunExclusiveAsync(async () =>
-            {
-                await RefreshCoreAsync(reloadEditor: true).ConfigureAwait(true);
-                LastOperationFailed = false;
-                LastOperationMessage = "Unsaved edits reverted to the current Windows job state.";
-            }).ConfigureAwait(true);
+            await RevertAsync().ConfigureAwait(true);
         }
         catch
         {
@@ -240,9 +282,38 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RefreshCoreAsync(bool reloadEditor)
+    public async Task RevertAsync()
     {
+        await RunExclusiveAsync(async () =>
+        {
+            await RefreshCoreAsync(reloadEditor: true).ConfigureAwait(true);
+            LastOperationFailed = false;
+            LastOperationMessage = Editor.IsDirty
+                ? "Job state refreshed. Newer unsaved edits were preserved."
+                : "Unsaved edits reverted to the current Windows job state.";
+        }).ConfigureAwait(true);
+    }
+
+    private async Task<bool> RefreshAfterMutationAsync(bool reloadEditor, long? editorRevision = null)
+    {
+        try
+        {
+            await RefreshCoreAsync(reloadEditor, editorRevision).ConfigureAwait(true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            IsSnapshotStale = true;
+            LastOperationMessage += $" Job state could not be refreshed: {ToUserMessage(ex)} Displayed values may be outdated; refresh to verify them.";
+            return false;
+        }
+    }
+
+    private async Task RefreshCoreAsync(bool reloadEditor, long? editorRevision = null)
+    {
+        var expectedRevision = editorRevision ?? Volatile.Read(ref _editorRevision);
         var snapshot = await Task.Run(_session.GetSnapshot).ConfigureAwait(true);
+        HasSnapshot = true;
         Accounting = snapshot.Accounting;
 
         Members.Clear();
@@ -257,54 +328,42 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
             LimitViolations.Add(violation);
         }
 
-        if (reloadEditor)
+        if (reloadEditor && expectedRevision == Volatile.Read(ref _editorRevision))
         {
             Editor.Load(snapshot.Restrictions);
         }
 
         RestrictionSummary = BuildRestrictionSummary(snapshot.Restrictions);
         KillOnCloseConfigured = snapshot.Restrictions.HardLimits.KillOnJobClose;
-        LiveNotificationOwnerRequiredOnClose =
-            CanPostEndOfJobNotification &&
-            snapshot.Restrictions.EndAction == JobEndAction.PostNotification &&
-            snapshot.Restrictions.HardLimits.PerJobUserTimeLimit.HasValue;
+        LiveNotificationOwnerRequiredOnClose = RequiresLiveNotificationOwner(snapshot.Restrictions);
+        IsSnapshotStale = false;
         OnPropertyChanged(nameof(MemberCount));
         OnPropertyChanged(nameof(MemberCountDisplay));
     }
 
-    private async Task RunExclusiveAsync(Func<Task> action)
+    private bool RequiresLiveNotificationOwner(RestrictionProfile profile) =>
+        CanPostEndOfJobNotification && profile.EndAction == JobEndAction.PostNotification &&
+        profile.HardLimits.PerJobUserTimeLimit.HasValue;
+
+    private Task<bool> RunExclusiveAsync(Func<Task> action) => RunExclusiveAsync(async () =>
     {
-        ThrowIfDisposed();
-        await _operationGate.WaitAsync().ConfigureAwait(true);
-        IsBusy = true;
-        try
-        {
-            await action().ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            LastOperationFailed = true;
-            LastOperationMessage = ToUserMessage(ex);
-            throw;
-        }
-        finally
-        {
-            IsBusy = false;
-            _operationGate.Release();
-        }
-    }
+        await action().ConfigureAwait(true);
+        return true;
+    });
 
     private async Task<T> RunExclusiveAsync<T>(Func<Task<T>> action)
     {
         ThrowIfDisposed();
         await _operationGate.WaitAsync().ConfigureAwait(true);
-        IsBusy = true;
         try
         {
+            ThrowIfDisposed();
+            IsBusy = true;
             return await action().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
+            IsSnapshotStale = true;
             LastOperationFailed = true;
             LastOperationMessage = ToUserMessage(ex);
             throw;
@@ -337,34 +396,60 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static string BuildRestrictionSummary(RestrictionProfile profile)
+    internal static string BuildRestrictionSummary(RestrictionProfile profile)
     {
-        var hardCount = 0;
+        var parts = new List<string>();
         var hard = profile.HardLimits;
-        if (hard.KillOnJobClose) hardCount++;
-        if (hard.ActiveProcessLimit.HasValue) hardCount++;
-        if (hard.PerProcessUserTimeLimit.HasValue || hard.PerJobUserTimeLimit.HasValue) hardCount++;
-        if (hard.ProcessMemoryLimitBytes.HasValue || hard.JobMemoryLimitBytes.HasValue) hardCount++;
-        if (hard.MinimumWorkingSetBytes.HasValue || hard.MaximumWorkingSetBytes.HasValue) hardCount++;
-        if (hard.AffinityMask.HasValue || hard.SubsetAffinityAllowed || hard.PriorityClass.HasValue || hard.SchedulingClass.HasValue) hardCount++;
-        if (profile.Cpu.Mode != CpuControlMode.Disabled || profile.Cpu.UsesUnsupportedPerProcessorCaps) hardCount++;
-        if (profile.Network.MaximumBandwidthMegabitsPerSecond.HasValue || profile.Network.DscpTag.HasValue) hardCount++;
-        if (profile.UiRestrictions != UiRestrictionFlags.None) hardCount++;
-
-        var notificationCount = 0;
-        var notification = profile.Notifications;
-        if (notification.PerJobUserTime.HasValue) notificationCount++;
-        if (notification.JobMemoryBytes.HasValue || notification.JobLowMemoryBytes.HasValue) notificationCount++;
-        if (notification.IoReadBytes.HasValue || notification.IoWriteBytes.HasValue) notificationCount++;
-        if (notification.CpuTolerance != RateTolerance.None || notification.IoTolerance != RateTolerance.None || notification.NetworkTolerance != RateTolerance.None) notificationCount++;
-
-        if (hardCount == 0 && notificationCount == 0)
+        if (hard.KillOnJobClose) parts.Add("Terminate on last handle close");
+        if (hard.BreakawayAllowed) parts.Add("Breakaway allowed");
+        if (hard.SilentBreakawayAllowed) parts.Add("Silent breakaway allowed");
+        if (hard.DieOnUnhandledException) parts.Add("Terminate on unhandled exception");
+        if (hard.ActiveProcessLimit is { } count) parts.Add($"Process limit {count}");
+        if (hard.PerProcessUserTimeLimit is { } processTime) parts.Add($"Process CPU time {Seconds(processTime)} s");
+        if (hard.PerJobUserTimeLimit is { } jobTime) parts.Add($"Job CPU time {Seconds(jobTime)} s");
+        if (hard.ProcessMemoryLimitBytes is { } processMemory) parts.Add($"Process memory {Bytes(processMemory)}");
+        if (hard.JobMemoryLimitBytes is { } jobMemory) parts.Add($"Job memory {Bytes(jobMemory)}");
+        if (hard.MinimumWorkingSetBytes is { } minimumWorkingSet) parts.Add($"Minimum working set {Bytes(minimumWorkingSet)}");
+        if (hard.MaximumWorkingSetBytes is { } maximumWorkingSet) parts.Add($"Maximum working set {Bytes(maximumWorkingSet)}");
+        if (hard.AffinityMask is { } affinity) parts.Add($"Affinity 0x{affinity:X}");
+        if (hard.SubsetAffinityAllowed) parts.Add("Subset affinity allowed");
+        if (hard.PriorityClass is { } priority) parts.Add($"Priority {priority}");
+        if (hard.SchedulingClass is { } scheduling) parts.Add($"Scheduling class {scheduling}");
+        if (profile.Cpu.UsesUnsupportedPerProcessorCaps) parts.Add("Per-processor CPU caps (preserved)");
+        else
         {
-            return "No configured restrictions";
+            switch (profile.Cpu.Mode)
+            {
+                case CpuControlMode.Rate: parts.Add($"CPU rate {profile.Cpu.RatePercent:G}%"); break;
+                case CpuControlMode.HardCap: parts.Add($"CPU cap {profile.Cpu.RatePercent:G}%"); break;
+                case CpuControlMode.Weight: parts.Add($"CPU weight {profile.Cpu.Weight}"); break;
+                case CpuControlMode.MinimumMaximum: parts.Add($"CPU range {profile.Cpu.MinimumPercent:G}–{profile.Cpu.MaximumPercent:G}%"); break;
+            }
         }
-
-        return $"{hardCount} hard/control · {notificationCount} notification-only";
+        if (profile.Cpu.Notify) parts.Add("CPU notifications");
+        if (profile.Network.ExactMaximumBandwidthBytesPerSecond is { } upload)
+            parts.Add($"Upload {ByteRate(upload)}");
+        else if (profile.Network.MaximumBandwidthMegabitsPerSecond is { } megabits)
+            parts.Add($"Upload {megabits / 8:G} MB/s");
+        if (profile.Network.DscpTag is { } dscp) parts.Add($"DSCP {dscp}");
+        if (profile.UiRestrictions != UiRestrictionFlags.None) parts.Add($"UI restrictions: {profile.UiRestrictions}");
+        if (profile.ProcessorGroups.Count != 0) parts.Add($"Processor groups: {string.Join(", ", profile.ProcessorGroups.Select(group => $"{group.Group}:0x{group.Mask:X}"))}");
+        if (profile.EndAction == JobEndAction.PostNotification) parts.Add("Notify at end of job time");
+        var notification = profile.Notifications;
+        if (notification.PerJobUserTime is { } notifyTime) parts.Add($"Notify at {Seconds(notifyTime)} s job CPU time");
+        if (notification.JobMemoryBytes is { } notifyMemory) parts.Add($"Notify above {Bytes(notifyMemory)} job memory");
+        if (notification.JobLowMemoryBytes is { } lowMemory) parts.Add($"Notify below {Bytes(lowMemory)} job memory");
+        if (notification.IoReadBytes is { } readBytes) parts.Add($"Notify at {Bytes(readBytes)} read");
+        if (notification.IoWriteBytes is { } writeBytes) parts.Add($"Notify at {Bytes(writeBytes)} written");
+        if (notification.CpuTolerance != RateTolerance.None) parts.Add($"CPU notification tolerance {notification.CpuTolerance} / {notification.CpuToleranceInterval}");
+        if (notification.IoTolerance != RateTolerance.None) parts.Add($"I/O notification tolerance {notification.IoTolerance} / {notification.IoToleranceInterval}");
+        if (notification.NetworkTolerance != RateTolerance.None) parts.Add($"Network notification tolerance {notification.NetworkTolerance} / {notification.NetworkToleranceInterval}");
+        return parts.Count == 0 ? "No configured restrictions" : string.Join(" · ", parts);
     }
+
+    private static string Seconds(TimeSpan value) => ((decimal)value.Ticks / TimeSpan.TicksPerSecond).ToString("0.#######", System.Globalization.CultureInfo.CurrentCulture);
+    private static string Bytes(ulong value) => value >= 1_048_576 ? $"{value / 1_048_576m:0.###} MiB" : $"{value} B";
+    private static string ByteRate(ulong value) => value >= 1_000_000 ? $"{value / 1_000_000m:G29} MB/s" : value >= 1_000 ? $"{value / 1_000m:G29} kB/s" : $"{value} B/s";
 
     private static string ToUserMessage(Exception exception)
     {
@@ -463,10 +548,10 @@ internal sealed class JobViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _session.Dispose();
         _isDisposed = true;
         _session.NotificationReceived -= SessionNotificationReceived;
         ResetPendingNotifications();
-        _session.Dispose();
         _operationGate.Dispose();
     }
 }
