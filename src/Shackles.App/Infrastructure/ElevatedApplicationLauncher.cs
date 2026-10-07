@@ -9,7 +9,7 @@ internal static class ElevatedApplicationLauncher
     {
         var startInfo = CreateStartInfo(
             Environment.ProcessPath,
-            typeof(App).Assembly.Location,
+            AppContext.BaseDirectory,
             workspaceArgument);
         using var process = Process.Start(startInfo);
         if (process is null)
@@ -21,7 +21,7 @@ internal static class ElevatedApplicationLauncher
 
     internal static ProcessStartInfo CreateStartInfo(
         string? executablePath,
-        string? applicationAssemblyPath,
+        string? applicationDirectory,
         string workspaceArgument)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -42,13 +42,13 @@ internal static class ElevatedApplicationLauncher
                 "dotnet",
                 StringComparison.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(applicationAssemblyPath))
+            if (string.IsNullOrWhiteSpace(applicationDirectory))
             {
                 throw new InvalidOperationException(
                     "Windows could not determine the Shackles application assembly path.");
             }
 
-            startInfo.ArgumentList.Add(applicationAssemblyPath);
+            startInfo.ArgumentList.Add(Path.Combine(applicationDirectory, "Shackles.dll"));
         }
 
         startInfo.ArgumentList.Add(workspaceArgument);

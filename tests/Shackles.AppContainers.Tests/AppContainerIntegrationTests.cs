@@ -292,7 +292,16 @@ public sealed class AppContainerIntegrationTests
         var grantedDirectory = Path.Combine(root, "granted");
         Directory.CreateDirectory(journalDirectory);
         Directory.CreateDirectory(grantedDirectory);
-        var fake = new FakeBrokeredFileSystemConfigurator();
+        string? journalPath = null;
+        CleanupJournalRecord? initialRecord = null;
+        var fake = new FakeBrokeredFileSystemConfigurator(() =>
+        {
+            journalPath = Directory
+                .EnumerateFiles(journalDirectory, "Shackles.*.json")
+                .Single();
+            initialRecord = JsonSerializer.Deserialize<CleanupJournalRecord>(
+                File.ReadAllText(journalPath));
+        });
         try
         {
             using var manager = new AppContainerManager(
@@ -314,7 +323,7 @@ public sealed class AppContainerIntegrationTests
                 },
                 new AppContainerLaunchOptions(GetCommandPromptPath())
                 {
-                    Arguments = "/d /c choice /c y /d y /t 1 >nul",
+                    Arguments = "/d /c exit 0",
                     WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
                     IncludeTargetDirectoryGrant = false
                 });
@@ -327,13 +336,12 @@ public sealed class AppContainerIntegrationTests
                 warning.Contains(
                     "experimental Brokered File System",
                     StringComparison.Ordinal)));
-            var journalPath = Directory
-                .EnumerateFiles(journalDirectory, "Shackles.*.json")
-                .Single();
-            var record = JsonSerializer.Deserialize<CleanupJournalRecord>(
-                File.ReadAllText(journalPath))!;
-            Assert.IsTrue(record.BrokeredFileSystemPolicyMayExist);
-            Assert.IsEmpty(record.Grants);
+            Assert.IsNotNull(journalPath);
+            Assert.IsNotNull(initialRecord);
+            Assert.IsTrue(initialRecord.BrokeredFileSystemPolicyMayExist,
+                "BFS cleanup intent must be persisted before applying the policy.");
+            Assert.IsEmpty(initialRecord.Grants);
+            var record = initialRecord;
 
             Assert.IsTrue(
                 SpinWait.SpinUntil(
@@ -488,7 +496,7 @@ public sealed class AppContainerIntegrationTests
         }
     }
 
-    private sealed class FakeBrokeredFileSystemConfigurator :
+    private sealed class FakeBrokeredFileSystemConfigurator(Action policyAdded) :
         IBrokeredFileSystemConfigurator
     {
         public BrokeredFileSystemSupport Support { get; } = new(
@@ -506,7 +514,11 @@ public sealed class AppContainerIntegrationTests
 
         public void AddPolicy(
             string appContainerName,
-            TrackedAclGrant grant) => AddedGrants.Add(grant);
+            TrackedAclGrant grant)
+        {
+            AddedGrants.Add(grant);
+            policyAdded();
+        }
 
         public string? TryClearPolicy(string appContainerName)
         {

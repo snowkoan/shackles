@@ -19,6 +19,24 @@ public sealed class SandboxWorkspaceLifecycleTests
     private static readonly Lazy<Task<Dispatcher>> UiDispatcher = new(CreateDispatcher);
 
     [TestMethod]
+    public async Task TestHostLoadsApplicationResourcesWithoutOpeningShackles()
+    {
+        await OnUi(async () =>
+        {
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var application = System.Windows.Application.Current;
+            Assert.IsNull(application.StartupUri, "The test host must not run the application's startup window.");
+#pragma warning disable WPF0001 // Match the Fluent theme already used by App.xaml.
+            Assert.AreEqual(System.Windows.ThemeMode.System, application.ThemeMode);
+#pragma warning restore WPF0001
+            Assert.IsFalse(application.Windows.OfType<System.Windows.Window>().Any(window => window.IsVisible),
+                "The WPF component tests must keep their windows offscreen.");
+            Assert.IsInstanceOfType<System.Windows.Style>(application.FindResource("ActionButtonStyle"),
+                "The test host must still load the real application resources.");
+        });
+    }
+
+    [TestMethod]
     public async Task ManagersAreLazyAndInitializedAwayFromTheUiThread()
     {
         var directory = Directory.CreateTempSubdirectory("Shackles-ui-init-").FullName;
@@ -368,8 +386,18 @@ public sealed class SandboxWorkspaceLifecycleTests
         {
             try
             {
-                var application = new App { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown };
-                application.InitializeComponent();
+                // Load the real theme and styles without configuring application startup.
+#pragma warning disable WPF0001 // Match the Fluent theme already used by App.xaml.
+                var application = new System.Windows.Application
+                {
+                    ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown,
+                    ThemeMode = System.Windows.ThemeMode.System
+                };
+#pragma warning restore WPF0001
+                application.Resources.MergedDictionaries.Add(new System.Windows.ResourceDictionary
+                {
+                    Source = new Uri("/Shackles;component/Resources/ApplicationStyles.xaml", UriKind.Relative)
+                });
                 ready.SetResult(Dispatcher.CurrentDispatcher);
                 Dispatcher.Run();
             }
