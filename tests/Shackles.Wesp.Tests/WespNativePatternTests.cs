@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Shackles.Wesp.Internal;
 
 namespace Shackles.Wesp.Tests;
@@ -6,10 +5,6 @@ namespace Shackles.Wesp.Tests;
 [TestClass]
 public sealed class WespNativePatternTests
 {
-    private static readonly string BundledClientPath = Path.Combine(
-        AppContext.BaseDirectory,
-        "espclient.dll");
-
     [TestMethod]
     public void GeneratedDirectoryPatternMatchesDirectAndDeepDescendantsOnly()
     {
@@ -101,17 +96,10 @@ public sealed class WespNativePatternTests
 
     private static bool Matches(string value, string pattern)
     {
-        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
-        {
-            Assert.Inconclusive("The bundled WESP pattern matcher requires Windows x64.");
-        }
-
-        Assert.IsTrue(
-            File.Exists(BundledClientPath),
-            $"The bundled WESP client was not copied to the test output: {BundledClientPath}");
+        var libraryPath = WespNativeTestClient.RequireBundledClient();
         try
         {
-            return WespPatternMatcher.Matches(BundledClientPath, value, pattern);
+            return WespPatternMatcher.Matches(libraryPath, value, pattern);
         }
         catch (Exception exception)
         {

@@ -18,6 +18,15 @@ $ErrorActionPreference = "Stop"
 
 $solution = Join-Path $PSScriptRoot "Shackles.slnx"
 $appProject = Join-Path $PSScriptRoot "src\Shackles.App\Shackles.App.csproj"
+$wespClientPath = Join-Path $PSScriptRoot "local-dependencies\wesp\espclient.dll"
+
+if (Test-Path -LiteralPath $wespClientPath -PathType Leaf) {
+    Write-Host "Optional WESP client found; it will be included in build and publish outputs."
+}
+else {
+    Write-Host "Optional WESP client not found; building without espclient.dll."
+    Write-Host "To include it, place an authorized x64 client in local-dependencies\wesp\espclient.dll."
+}
 
 if ($Publish -and -not $PSBoundParameters.ContainsKey("Configuration")) {
     $Configuration = "Release"
@@ -51,7 +60,13 @@ foreach ($buildConfiguration in $configurations) {
         }
 
         Write-Host "Shackles $buildConfiguration package: $publishDirectory"
-        Write-Host "Distribute Shackles.exe and espclient.dll together; the .NET 10 Desktop Runtime is required."
+        if (Test-Path -LiteralPath (Join-Path $publishDirectory "espclient.dll") -PathType Leaf) {
+            Write-Host "This local package includes the optional WESP client; distribution requires appropriate permission."
+        }
+        else {
+            Write-Host "This package omits the optional WESP client; the WESP page will explain setup if no client is installed."
+        }
+        Write-Host "The .NET 10 Desktop Runtime is required."
     }
 }
 

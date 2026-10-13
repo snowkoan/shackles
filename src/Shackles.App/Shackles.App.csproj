@@ -18,8 +18,10 @@
     <ProjectReference Include="..\Shackles.Wesp\Shackles.Wesp.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Update="espclient.dll"
+  <ItemGroup Condition="'$(WespClientAvailable)' == 'true'">
+    <None Include="$(WespClientPath)"
+          Link="espclient.dll"
+          TargetPath="espclient.dll"
           CopyToOutputDirectory="Always"
           CopyToPublishDirectory="Always"
           ExcludeFromSingleFile="true" />

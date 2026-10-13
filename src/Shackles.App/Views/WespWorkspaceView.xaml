@@ -709,7 +709,7 @@
                                        Text="Administrator access required" />
                             <TextBlock Margin="0,8,0,0"
                                        Style="{StaticResource AdministratorPromptBodyStyle}"
-                                       Text="WESP accepts client connections only from a high-integrity process. This workspace is locked so you do not spend time configuring a session that cannot start." />
+                                       Text="You can check client DLL availability using Refresh support above. Configuring rules and starting a WESP session require administrator access." />
                             <TextBlock Margin="0,9,0,0"
                                        Style="{StaticResource CaptionStyle}"
                                        Text="Open an administrator copy directly on WESP Blocking. This Shackles window stays open, along with any work in the other workspaces."

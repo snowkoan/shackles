@@ -120,10 +120,17 @@ Create the normal x64 single-file package, which uses the separately installed
 ```
 
 `-Publish` defaults to Release. The package is written to
-`artifacts\publish\win-x64\Release` and contains `Shackles.exe` plus
-`espclient.dll`. Keep both files together; the DLL stays separate so it can be
-replaced independently. Application libraries and debug symbols are bundled into
-the executable, while the .NET runtime is not included.
+`artifacts\publish\win-x64\Release` and contains `Shackles.exe`. Application
+libraries and debug symbols are bundled into the executable, while the .NET
+runtime is not included.
+
+Shackles builds and publishes without the optional WESP client DLL. For local
+WESP development, place an authorized x64 WESP 1.0 `espclient.dll` in
+`local-dependencies\wesp` before building or publishing. That file is ignored
+by Git and is copied beside the app only when present. See the
+[local dependency instructions](local-dependencies/wesp/README.md). A local SDK
+copy does not establish public redistribution rights; follow the SDK's terms
+before distributing it.
 
 Use `.\build.ps1 Debug -Publish` for a Debug package or
 `.\build.ps1 All -Publish` for both configurations. Each configuration has its own
@@ -155,26 +162,37 @@ and known boundaries.
 
 ### Requirements
 
-- An x64 Windows test image supported by the supplied WESP preview package.
-- The `wesp` driver installed and running, with Windows test-signing enabled for
-  the current boot when required by that package.
+- An x64 Windows test image supported by the supplied WESP preview 1.0.0 package.
+- The matching WESP 1.0 `wesp` driver installed and running, with Windows
+  test-signing enabled for the current boot when required by that package.
 - Shackles started with **Run as administrator**. Connecting to WESP requires a
   high-integrity process token.
 - No other Shackles instance with an active WESP Blocking session.
 
-Shackles bundles `espclient.dll` beside the application. The support status checks
-that the DLL loads and exposes the baseline client APIs. Driver connectivity and
-the capabilities needed by the configured policy are exercised on first launch;
-if registration or connection fails, Shackles also reports the observed `wesp`
-service state.
+The WESP client is optional and supplied locally. Shackles checks
+`SHACKLES_WESP_CLIENT_DLL` first, then `espclient.dll` beside the application,
+then `%SystemRoot%\System32\espclient.dll`. It does not load from the source
+checkout's `local-dependencies` directory at runtime. The support status checks
+that the selected DLL loads and exposes the baseline client APIs. Driver
+connectivity and the capabilities needed by the configured policy are exercised
+on first launch; if registration or connection fails, Shackles also reports the
+observed `wesp` service state.
+
+Before upgrading a WESP driver, use a clean test machine or unregister **all WESP
+clients**. WESP 1.0 does not support upgrading persisted rules, and old rules can
+cause a bugcheck with a newer driver. Shackles' startup cleanup runs after boot
+and cannot replace that pre-upgrade step. The
+[setup guidance](docs/WESP-BLOCKING.md#setting-up-wesp-10) also covers the separate
+Windows Insider Beta enablement route and retail code-integrity requirements.
 
 ### Basic usage
 
-1. Open the **WESP Blocking** tab. If this Shackles window is not running at
-   high integrity, the workspace stays locked and offers **Open WESP Blocking
-   as administrator**, which opens a separate elevated copy directly on this
-   tab. In the elevated window, wait for **WESP client is available**, or use
-   **Refresh support**.
+1. Open the **WESP Blocking** tab and wait for the client support check. If the
+   DLL is missing, the page shows setup instructions before elevation. Supply
+   an authorized x64 WESP 1.0 `espclient.dll` beside the running app and select
+   **Refresh support**, or follow the local dependency instructions and rebuild.
+   Once the client is available, **Open WESP Blocking as administrator** opens
+   a separate elevated copy if needed. Policy controls require high integrity.
 2. On **Files**, add existing folders as **Blocked** or **Read-only**. Optionally
    select **Block access to UNC paths** to cover network paths such as
    `\\server\share`.
@@ -233,20 +251,21 @@ saved after the session closes as a UTF-8 tab-separated log with session and
 policy context.
 
 Closing first requests termination of roots launched by Shackles, then removes
-the rules and disconnects the client. Processes selected while already running
-are never terminated by session close. Selected processes and descendants may
-therefore continue unrestricted after rule removal. If a launched root remains,
-or live callback state cannot safely be released, Shackles retains the session
-for retry and shows **CLEANUP NEEDED**. Other close errors are still reported
-even if the session has closed.
+the rules, disconnects, and unregisters the client. Processes selected while
+already running are never terminated by session close. Selected processes and
+descendants may therefore continue unrestricted after rule removal. If a
+launched root remains, or live callback state cannot safely be released,
+Shackles retains the session for retry and shows **CLEANUP NEEDED**. Other close
+errors are still reported even if the session has closed.
 
 WESP layouts may change. Shackles displays the connected client version but does
 not reject it solely by version. It checks required exports, event capabilities,
 and built-in properties, while context-key support is validated by the actual
-filter, rule, and tagging operations. The current managed ABI layout profile was
-tested with the supplied WESP 0.13 client. For an unvalidated DLL version,
-enforcement can continue but extended process details in asynchronous activity
-rows are left unknown until that notification layout is validated.
+filter, rule, and tagging operations. The current managed ABI layout profile
+targets the supplied x64 WESP preview 1.0.0 client and headers. For an
+unvalidated DLL version, enforcement can continue but extended process details
+in asynchronous activity rows are left unknown until that notification layout
+is validated.
 
 > [!WARNING]
 > Treat this as WESP enforcement research, not an adversarial security boundary.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Reflection;
@@ -7,23 +8,38 @@ using Shackles.Wesp.Interop;
 namespace Shackles.Wesp.Tests;
 
 [TestClass]
-public sealed class WespAbiV013Tests
+public sealed class WespAbiV100Tests
 {
     [TestMethod]
-    public void ProfileDocumentsBundledPreview013ClientBuild()
+    public void ProfileDocumentsBundledPreview100ClientBuild()
     {
-        var fields = typeof(WespAbiV013).GetFields(
+        var fields = typeof(WespAbiV100).GetFields(
             BindingFlags.Static | BindingFlags.NonPublic);
         Assert.AreEqual(
-            "0.1.0.154553750",
-            fields.Single(field => field.Name == nameof(WespAbiV013.FileVersion)).GetRawConstantValue());
+            "0.1.0.158348338",
+            fields.Single(field => field.Name == nameof(WespAbiV100.FileVersion)).GetRawConstantValue());
         Assert.AreEqual(
-            "0.1.0.154553750+3639f00d",
-            fields.Single(field => field.Name == nameof(WespAbiV013.ProductVersion)).GetRawConstantValue());
+            "0.1.0.158348338+04996f13",
+            fields.Single(field => field.Name == nameof(WespAbiV100.ProductVersion)).GetRawConstantValue());
     }
 
     [TestMethod]
-    public void LeafLayoutsMatchPreview013Abi()
+    public void BundledClientMetadataMatchesPreview100Profile()
+    {
+        var libraryPath = WespNativeTestClient.RequireBundledClient();
+        var version = FileVersionInfo.GetVersionInfo(libraryPath);
+        Assert.AreEqual(
+            WespAbiV100.FileVersion,
+            version.FileVersion,
+            "The bundled WESP client's file version does not match the validated ABI profile.");
+        Assert.AreEqual(
+            WespAbiV100.ProductVersion,
+            version.ProductVersion,
+            "The bundled WESP client's product version does not match the validated ABI profile.");
+    }
+
+    [TestMethod]
+    public void LeafLayoutsMatchPreview100Abi()
     {
         Assert.AreEqual(32, Marshal.SizeOf<NativeStringComparison>());
         Assert.AreEqual(56, Marshal.SizeOf<NativeIntegerComparison>());
@@ -47,7 +63,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void ExistingProcessIdentityIdsMatchPreview013Abi()
+    public void ExistingProcessIdentityIdsMatchPreview100Abi()
     {
         Assert.AreEqual(2u, CompilerConstant(nameof(WespRuleCompiler.ProcessCreateTimeProperty)));
         Assert.AreEqual(6u, CompilerConstant(nameof(WespRuleCompiler.ProcessIdProperty)));
@@ -59,7 +75,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void ProcessCreateOffsetsMatchPreview013Abi()
+    public void ProcessCreateOffsetsMatchPreview100Abi()
     {
         Assert.AreEqual(1328, Marshal.SizeOf<NativeProcessCreateConfig>());
         Assert.AreEqual(8, OffsetOf<NativeProcessCreateConfig>(nameof(NativeProcessCreateConfig.NewProcessFilter)));
@@ -76,7 +92,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void IoOffsetsMatchPreview013Abi()
+    public void IoOffsetsMatchPreview100Abi()
     {
         Assert.AreEqual(1864, Marshal.SizeOf<NativeIoEventConfig>());
         Assert.AreEqual(544, OffsetOf<NativeIoEventConfig>(nameof(NativeIoEventConfig.RequestorProcessFilter)));
@@ -96,7 +112,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void RegistryOffsetsMatchPreview013Abi()
+    public void RegistryOffsetsMatchPreview100Abi()
     {
         Assert.AreEqual(600, Marshal.SizeOf<NativeRegistryEventConfig>());
         Assert.AreEqual(8, OffsetOf<NativeRegistryEventConfig>(nameof(NativeRegistryEventConfig.RegistryKeyFilter)));
@@ -112,7 +128,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void RuleDescriptorOffsetsMatchPreview013Abi()
+    public void RuleDescriptorOffsetsMatchPreview100Abi()
     {
         Assert.AreEqual(1128, Marshal.SizeOf<NativeRuleDescriptor>());
         Assert.AreEqual(96, OffsetOf<NativeRuleDescriptor>(nameof(NativeRuleDescriptor.EventTypeConfig)));
@@ -127,7 +143,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void AsyncEventQueueLayoutsMatchPreview013Abi()
+    public void AsyncEventQueueLayoutsMatchPreview100Abi()
     {
         Assert.AreEqual(32, Marshal.SizeOf<NativeEventQueueDescriptor>());
         Assert.AreEqual(0, OffsetOf<NativeEventQueueDescriptor>(nameof(NativeEventQueueDescriptor.QueueId)));
@@ -166,7 +182,7 @@ public sealed class WespAbiV013Tests
     }
 
     [TestMethod]
-    public void RegistryEventIdsMatchPreview013Abi()
+    public void RegistryEventIdsMatchPreview100Abi()
     {
         var registryEvents = Enum.GetValues<EspEventType>()
             .Where(eventType => (int)eventType is >= 7000 and <= 7014)

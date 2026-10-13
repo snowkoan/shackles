@@ -91,7 +91,7 @@ internal static class WespActivityDecoder
             {
                 var propertyPointer = nint.Add(
                     query.Properties,
-                    checked((int)index * WespAbiV013.PropertySize));
+                    checked((int)index * WespAbiV100.PropertySize));
                 var property = Marshal.PtrToStructure<NativeProperty>(propertyPointer);
                 if (property.PropertyId == WespRuleCompiler.ProcessIdProperty &&
                     property.Type == EspVariantType.UInt32)
@@ -210,7 +210,7 @@ internal static class WespActivityDecoder
         {
             var propertyPointer = nint.Add(
                 query.Properties,
-                checked((int)index * WespAbiV013.PropertySize));
+                checked((int)index * WespAbiV100.PropertySize));
             var property = Marshal.PtrToStructure<NativeProperty>(propertyPointer);
             if (property.Type != EspVariantType.UnicodeString)
             {

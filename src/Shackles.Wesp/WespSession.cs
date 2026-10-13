@@ -474,17 +474,17 @@ public sealed class WespSession : IDisposable
             var matchesProfile =
                 string.Equals(
                     version.FileVersion,
-                    WespAbiV013.FileVersion,
+                    WespAbiV100.FileVersion,
                     StringComparison.Ordinal) &&
                 string.Equals(
                     version.ProductVersion,
-                    WespAbiV013.ProductVersion,
+                    WespAbiV100.ProductVersion,
                     StringComparison.Ordinal);
             return new ConnectedClientInfo(
                 displayVersion,
                 matchesProfile
                     ? null
-                    : $"The connected WESP client DLL reports {displayVersion}; this POC's native layouts were validated with {WespAbiV013.ProductVersion}. Required capabilities are available, so the session was allowed to continue.",
+                    : $"The connected WESP client DLL reports {displayVersion}; this POC's native layouts were validated with {WespAbiV100.ProductVersion}. Required capabilities are available, so the session was allowed to continue.",
                 matchesProfile);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)

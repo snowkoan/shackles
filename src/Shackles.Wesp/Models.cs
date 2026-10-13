@@ -7,7 +7,10 @@ public enum WespAvailability
     ArchitectureNotSupported,
     ClientLibraryMissing,
     RequiredExportMissing,
-    ProbeFailed
+    ProbeFailed,
+    ClientLibraryInvalid,
+    ClientLibraryArchitectureNotSupported,
+    ClientLibraryLoadFailed
 }
 
 public sealed record WespSupportInfo(
@@ -17,6 +20,7 @@ public sealed record WespSupportInfo(
     IReadOnlyList<string> MissingExports)
 {
     public bool IsAvailable => Availability == WespAvailability.Available;
+    public IReadOnlyList<string> CheckedClientLibraryPaths { get; init; } = [];
 }
 
 public sealed record WespPolicy(

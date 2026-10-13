@@ -1,3 +1,4 @@
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using Shackles.Wesp.Internal;
 using Shackles.Wesp.Interop;
@@ -119,15 +120,40 @@ public static class WespSupport
         {
             return new WespSupportInfo(
                 WespAvailability.ArchitectureNotSupported,
-                "The bundled WESP client currently supports only x64 processes.",
+                "WESP Blocking currently supports only x64 Shackles processes.",
                 null,
                 Array.Empty<string>());
         }
 
-        string libraryPath;
+        return ProbeLibrarySearch(
+            Environment.GetEnvironmentVariable(WespClientLibrary.OverrideEnvironmentVariable),
+            AppContext.BaseDirectory,
+            Environment.SystemDirectory,
+            File.Exists,
+            path => ProbeClientLibrary(path, requiredExports, missingExportSummary));
+    }
+
+    internal static WespSupportInfo ProbeLibrarySearch(
+        string? configured,
+        string appBaseDirectory,
+        string systemDirectory,
+        Func<string, bool> fileExists,
+        Func<string, WespSupportInfo> inspectLibrary)
+    {
         try
         {
-            libraryPath = WespClientLibrary.GetCandidatePath();
+            var searchPaths = WespClientLibrary.GetSearchPaths(configured, appBaseDirectory, systemDirectory);
+            var useFirstPath = searchPaths.Count == 1 || fileExists(searchPaths[0]);
+            var libraryPath = useFirstPath ? searchPaths[0] : searchPaths[1];
+            IReadOnlyList<string> checkedPaths = useFirstPath ? [libraryPath] : searchPaths;
+            var result = fileExists(libraryPath)
+                ? inspectLibrary(libraryPath)
+                : new WespSupportInfo(
+                    WespAvailability.ClientLibraryMissing,
+                    $"The WESP client DLL was not found at '{libraryPath}'.",
+                    libraryPath,
+                    Array.Empty<string>());
+            return result with { CheckedClientLibraryPaths = checkedPaths };
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -138,43 +164,45 @@ public static class WespSupport
                 Array.Empty<string>());
         }
 
+    }
+
+    internal static WespSupportInfo ProbeClientLibrary(
+        string libraryPath,
+        IEnumerable<string> requiredExports,
+        string missingExportSummary)
+    {
         if (!File.Exists(libraryPath))
         {
             return new WespSupportInfo(
                 WespAvailability.ClientLibraryMissing,
-                $"WESP is not installed. {NativeMethods.WespLibrary} was not found at '{libraryPath}'.",
+                $"The WESP client DLL was not found at '{libraryPath}'.",
                 libraryPath,
                 Array.Empty<string>());
+        }
+
+        var imageIssue = ProbeClientImage(libraryPath);
+        if (imageIssue is not null)
+        {
+            return imageIssue;
         }
 
         nint library = 0;
         try
         {
-            if (!NativeLibrary.TryLoad(libraryPath, out library))
-            {
-                return new WespSupportInfo(
-                    WespAvailability.ProbeFailed,
-                    "The WESP client library is present but Windows could not load it.",
-                    libraryPath,
-                    Array.Empty<string>());
-            }
+            library = NativeLibrary.Load(libraryPath);
 
-            var missing = requiredExports
-                .Where(export => !NativeLibrary.TryGetExport(library, export, out _))
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-            if (missing.Length != 0)
-            {
-                return new WespSupportInfo(
-                    WespAvailability.RequiredExportMissing,
-                    missingExportSummary,
-                    libraryPath,
-                    missing);
-            }
-
+            return InspectLibraryExports(
+                libraryPath,
+                requiredExports,
+                export => NativeLibrary.TryGetExport(library, export, out _),
+                missingExportSummary);
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or BadImageFormatException)
+        {
             return new WespSupportInfo(
-                WespAvailability.Available,
-                "WESP client API found. Driver compatibility and the capabilities required by your rules will be checked when you launch.",
+                WespAvailability.ClientLibraryLoadFailed,
+                $"The WESP client DLL is present at '{libraryPath}', but Windows could not load it. " +
+                $"Check that the authorized x64 client and its dependencies are available, then refresh support. {exception.Message}",
                 libraryPath,
                 Array.Empty<string>());
         }
@@ -193,5 +221,87 @@ public static class WespSupport
                 NativeLibrary.Free(library);
             }
         }
+    }
+
+    internal static WespSupportInfo InspectLibraryExports(
+        string libraryPath,
+        IEnumerable<string> requiredExports,
+        Func<string, bool> hasExport,
+        string missingExportSummary)
+    {
+        var missing = requiredExports.Where(export => !hasExport(export))
+            .Order(StringComparer.Ordinal).ToArray();
+        return missing.Length != 0
+            ? new WespSupportInfo(
+                WespAvailability.RequiredExportMissing,
+                $"{missingExportSummary} Missing APIs: {string.Join(", ", missing)}. " +
+                "Replace it with an authorized x64 WESP client matching the supported release, then refresh support.",
+                libraryPath,
+                missing)
+            : new WespSupportInfo(
+                WespAvailability.Available,
+                "WESP client API found. Driver compatibility and the capabilities required by your rules will be checked when you start a session.",
+                libraryPath,
+                Array.Empty<string>());
+    }
+
+    internal static WespSupportInfo? ProbeClientImage(string libraryPath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(libraryPath);
+            using var reader = new PEReader(stream);
+            var headers = reader.PEHeaders;
+            return CheckClientImage(
+                libraryPath,
+                headers.PEHeader is not null,
+                (headers.CoffHeader.Characteristics & Characteristics.Dll) != 0,
+                headers.CoffHeader.Machine,
+                headers.PEHeader?.Magic ?? default);
+        }
+        catch (BadImageFormatException exception)
+        {
+            return new WespSupportInfo(
+                WespAvailability.ClientLibraryInvalid,
+                $"The WESP client DLL at '{libraryPath}' is malformed. " +
+                $"Replace it with an authorized x64 espclient.dll, then refresh support. {exception.Message}",
+                libraryPath,
+                Array.Empty<string>());
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return new WespSupportInfo(
+                WespAvailability.ProbeFailed,
+                $"The WESP client DLL at '{libraryPath}' could not be inspected: {exception.Message}",
+                libraryPath,
+                Array.Empty<string>());
+        }
+    }
+
+    internal static WespSupportInfo? CheckClientImage(
+        string libraryPath,
+        bool hasPeHeader,
+        bool isDll,
+        Machine machine,
+        PEMagic magic)
+    {
+        if (!hasPeHeader || !isDll)
+        {
+            return new WespSupportInfo(
+                WespAvailability.ClientLibraryInvalid,
+                $"The file at '{libraryPath}' is not a valid Windows DLL. " +
+                "Replace it with an authorized x64 espclient.dll, then refresh support.",
+                libraryPath,
+                Array.Empty<string>());
+        }
+
+        return machine != Machine.Amd64 || magic != PEMagic.PE32Plus
+            ? new WespSupportInfo(
+                WespAvailability.ClientLibraryArchitectureNotSupported,
+                $"The WESP client DLL at '{libraryPath}' is not x64 ({machine}). " +
+                "Use the authorized x64 espclient.dll, then refresh support.",
+                libraryPath,
+                Array.Empty<string>())
+            : null;
     }
 }

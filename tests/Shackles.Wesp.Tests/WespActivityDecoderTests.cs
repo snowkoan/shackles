@@ -380,13 +380,13 @@ public sealed class WespActivityDecoderTests
             }
 
             var propertyBuffer = Marshal.AllocHGlobal(
-                checked(properties.Count * WespAbiV013.PropertySize));
+                checked(properties.Count * WespAbiV100.PropertySize));
             _allocations.Add(propertyBuffer);
             for (var index = 0; index < properties.Count; index++)
             {
                 Marshal.StructureToPtr(
                     properties[index],
-                    nint.Add(propertyBuffer, index * WespAbiV013.PropertySize),
+                    nint.Add(propertyBuffer, index * WespAbiV100.PropertySize),
                     fDeleteOld: false);
             }
 
@@ -476,13 +476,13 @@ public sealed class WespActivityDecoderTests
             }
 
             var propertyBuffer = Marshal.AllocHGlobal(
-                checked(properties.Count * WespAbiV013.PropertySize));
+                checked(properties.Count * WespAbiV100.PropertySize));
             _allocations.Add(propertyBuffer);
             for (var index = 0; index < properties.Count; index++)
             {
                 Marshal.StructureToPtr(
                     properties[index],
-                    nint.Add(propertyBuffer, index * WespAbiV013.PropertySize),
+                    nint.Add(propertyBuffer, index * WespAbiV100.PropertySize),
                     fDeleteOld: false);
             }
 

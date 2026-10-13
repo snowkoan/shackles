@@ -6,5 +6,8 @@
     <Deterministic>true</Deterministic>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <WespClientPath>$(MSBuildThisFileDirectory)local-dependencies\wesp\espclient.dll</WespClientPath>
+    <WespClientAvailable>false</WespClientAvailable>
+    <WespClientAvailable Condition="Exists('$(WespClientPath)')">true</WespClientAvailable>
   </PropertyGroup>
 </Project>

@@ -1,11 +1,11 @@
 namespace Shackles.Wesp.Interop;
 
-// ABI profile for the WESP preview 0.13.0 headers and binaries. WESP is a
+// ABI profile for the WESP preview 1.0.0 headers and x64 release client. WESP is a
 // preview API: do not reuse these values for a different espclient.dll build.
-internal static class WespAbiV013
+internal static class WespAbiV100
 {
-    internal const string FileVersion = "0.1.0.154553750";
-    internal const string ProductVersion = "0.1.0.154553750+3639f00d";
+    internal const string FileVersion = "0.1.0.158348338";
+    internal const string ProductVersion = "0.1.0.158348338+04996f13";
 
     internal const int StringComparisonSize = 32;
     internal const int IntegerComparisonSize = 56;

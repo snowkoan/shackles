@@ -145,7 +145,7 @@ internal static class WespProcessTagger
         {
             var property = Marshal.PtrToStructure<NativeProperty>(nint.Add(
                 properties,
-                checked((int)index * WespAbiV013.PropertySize)));
+                checked((int)index * WespAbiV100.PropertySize)));
             if (property.PropertyId != WespRuleCompiler.ProcessCreateTimeProperty)
             {
                 continue;

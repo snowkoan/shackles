@@ -18,8 +18,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\src\Shackles.App\espclient.dll"
+    <AssemblyMetadata Include="WespClientExpected" Value="$(WespClientAvailable)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(WespClientAvailable)' == 'true'">
+    <None Include="$(WespClientPath)"
           Link="espclient.dll"
-          CopyToOutputDirectory="PreserveNewest" />
+          TargetPath="espclient.dll"
+          CopyToOutputDirectory="Always" />
   </ItemGroup>
 </Project>

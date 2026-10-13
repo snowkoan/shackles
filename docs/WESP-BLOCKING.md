@@ -28,10 +28,11 @@ performed by an already-running broker process.
 
 ## Requirements
 
-The current Shackles integration requires:
+WESP is optional: Shackles builds and publishes without its client DLL, and
+other workspaces remain available. Using the WESP workspace requires:
 
-- an x64 Windows test system supported by the WESP preview package;
-- the WESP preview driver installed and the `wesp` driver service running;
+- an x64 Windows test system supported by the WESP preview 1.0.0 package;
+- the matching WESP 1.0 driver installed and the `wesp` driver service running;
 - test-signing enabled for the current boot when required by the preview
   driver;
 - Shackles running as administrator with a high-integrity process token; and
@@ -42,27 +43,66 @@ Do not run two Shackles WESP Blocking sessions at the same time. Shackles uses
 a stable WESP client registration, and another active instance can prevent a
 new client session from being registered or connected.
 
-Shackles ships `espclient.dll` beside `Shackles.exe` and uses that copy by
-default. If it is absent, Shackles falls back to
-`%SystemRoot%\System32\espclient.dll`. SDK developers can set
-`SHACKLES_WESP_CLIENT_DLL` to an explicit full path, but should revalidate the
+Shackles selects the client DLL in this order: an explicit
+`SHACKLES_WESP_CLIENT_DLL` path, `espclient.dll` beside `Shackles.exe`, then
+`%SystemRoot%\System32\espclient.dll`. An explicit override takes precedence
+even if that path is missing or unusable. SDK developers should revalidate the
 interop layout tests before substituting a client built from different headers.
+
+For local builds, place an authorized x64 WESP 1.0 client at the repository-root
+path `local-dependencies\wesp\espclient.dll`. The file is ignored by Git and is
+copied to build and publish output only when present. The source directory is
+not a runtime search location; rebuild to copy a newly supplied DLL, or place it
+beside the running application. See the
+[local dependency instructions](../local-dependencies/wesp/README.md). A local
+SDK copy does not establish public redistribution rights; follow the SDK's terms
+before distributing it.
 
 The support indicator checks that a usable client DLL and the baseline session
 exports are present. It does not prove that the driver is running or that every
 configured rule is supported. Shackles checks the draft-specific exports and
 driver-facing capabilities when the first blocking session is started.
 
+## Setting up WESP 1.0
+
+Before upgrading the driver, use a clean test machine or unregister **all WESP
+clients**, including clients belonging to other tools. WESP 1.0 does not support
+upgrading persisted rules; rules left by an older release can cause a bugcheck
+with the new driver. Closing a Shackles session unregisters its own client, but
+does not clean up other clients. Shackles' startup reset happens after boot and
+cannot substitute for pre-upgrade cleanup.
+
+Use the client DLL and driver from the same WESP release. For a manual lab
+installation, follow the supplied `wesp-preview-1.0.0-lpp-release-notes.pdf`:
+copy `wesp.sys` to `%SystemRoot%\System32\drivers`, copy `espclient.dll` to
+`%SystemRoot%\System32`, import the supplied `install_wesp_driver.reg`, and
+reboot. An override or app-local DLL takes precedence over the system copy, so
+replacing only the system copy may not update Shackles' client. Early-boot ELAM
+debugger setup is separate from this client-session workspace.
+
+The supplied `WESP-enablement-instructions.pdf` describes a separate route for
+supported Windows 11 Insider Beta builds. Its reference build is `26200.9568`;
+later preview updates have different build numbers. Run the
+architecture-appropriate `WespEnablementTool.exe -enable` as administrator, then
+reboot. The documented test-signing path disables Secure Boot, enables test
+signing with `bcdedit /set testsigning on`, and reboots again; follow the
+supplied instructions on a disposable test machine. Retail enablement requires
+the client's approved EKU in the deployed
+Code Integrity policy. The Insider tool and test-signing route do not replace
+that retail requirement.
+
 ## Using the workspace
 
-1. Open the **WESP Blocking** workspace. If the current Shackles process is
-   below high integrity, the workspace is locked before any policy can be
-   configured. Select **Open WESP Blocking as administrator** to open a separate
+1. Open the **WESP Blocking** workspace and wait for the client support check.
+   If the client DLL is missing, setup instructions appear before elevation.
+   Supply an authorized x64 WESP 1.0 `espclient.dll` beside the running app and
+   select **Refresh support**, or supply it in the local dependency directory
+   and rebuild. Resolve any DLL load or missing-export error before continuing.
+2. Once the client is available, select **Open WESP Blocking as administrator**
+   if the current process is below high integrity. This opens a separate
    elevated copy directly on this workspace; the original window and its other
-   workspace state remain open.
-2. In the elevated window, wait for the automatic support check. Use **Refresh
-   support** to run the check again. Resolve any client-DLL problem before
-   continuing.
+   workspace state remain open. Policy controls require high integrity. In the
+   elevated window, wait for the support check or use **Refresh support** again.
 3. On the **Files** tab, add any existing folders that should be protected and
    choose one of these modes:
    - **Blocked** denies configured reads, opens, and changes.
@@ -233,6 +273,14 @@ live callback state cannot be released safely, Shackles reports **Cleanup
 needed** and retains the remaining session state so cleanup can be retried.
 Other close errors are reported even when the session has closed.
 
+The supplied `WESP_Boot_Recovery_Partner_Guidance_Sept28.pdf` says that three
+failed boots trigger deletion of the entire persisted WESP store without
+notifying clients.
+Shackles uses client-session resources and recreates its policy on each new
+session; it does not replay persistent rules after boot. A missing prior
+registration is accepted during startup cleanup, so store recovery already
+fits that lifecycle.
+
 Future descendants are policy-tagged but are not tracked as a lifetime group.
 When the session closes successfully, selected existing processes and surviving
 descendants may continue after the rules are removed.
@@ -262,9 +310,15 @@ is written appear only in a later export.
 
 ## Compatibility and versioning
 
-The current managed interop profile and its layout tests were validated against
-the x64 WESP 0.13 client package and the *Windows Endpoint Security Platform API
-Specification, Revision 3.2*.
+The current managed interop profile and its layout tests target the x64 WESP
+preview 1.0.0 release headers and client package. The *Windows
+Endpoint Security Platform API Specification, Revision 3.2* remains a reference
+for the API concepts; the supplied 1.0 headers define the pinned native layouts.
+
+The package release label is separate from native DLL version metadata. Its
+`espclient.dll` reports file version `0.1.0.158348338` and product version
+`0.1.0.158348338+04996f13`; seeing those values in a Shackles session is expected
+for this WESP 1.0 package.
 
 Shackles reads the connected DLL version and shows it in the session. It does
 not reject a client only because its file-version metadata differs. A version
@@ -292,6 +346,9 @@ before treating a successful connection as validation.
 
 ### Shackles reports that WESP is unavailable
 
+- If the DLL is missing, WESP stays unavailable and the page shows local setup
+  instructions. Supply the DLL, then select **Refresh support**; elevation is
+  required afterward to start a session.
 - Confirm that the app-local `espclient.dll` is beside `Shackles.exe`, or that
   a compatible copy exists in `%SystemRoot%\System32`.
 - Confirm that Shackles is running as an x64 process.
@@ -299,6 +356,8 @@ before treating a successful connection as validation.
   path to the intended x64 DLL.
 - A missing-export error usually means the DLL does not expose the API surface
   required by the configured policy.
+- A DLL that is present but cannot load must be replaced with a usable x64
+  client. Confirm the selected path, then use **Refresh support** again.
 
 ### Starting WESP Blocking reports access denied
 

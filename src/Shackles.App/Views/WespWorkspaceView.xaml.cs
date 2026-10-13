@@ -98,13 +98,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             return;
         }
 
-        if (!_hasRequiredIntegrity)
-        {
-            _prepared = true;
-            return;
-        }
-
-        if (!_isBusy)
+        if (_hasRequiredIntegrity && !_isBusy)
         {
             RefreshSessionDetails(showProcessNotice: false);
         }
@@ -123,7 +117,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
 
     private async Task RefreshSupportAsync()
     {
-        if (_disposed || _isBusy || !_hasRequiredIntegrity)
+        if (_disposed || _isBusy)
         {
             return;
         }
@@ -138,16 +132,9 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
             }
 
             _support = support;
-            SupportStateText.Text = support.IsAvailable
-                ? "WESP client is available"
-                : "WESP Blocking is unavailable";
-            SupportDetailText.Text = support.IsAvailable
-                ? "Client API found. Driver and rule support are checked when you start a session."
-                : support.Summary;
-            ShowNotice(
-                support.IsAvailable
-                    ? "The WESP client API was found. Driver compatibility and rule capabilities will be checked when the session starts. You can launch a new process or choose one that is already running."
-                    : support.Summary);
+            SupportStateText.Text = GetSupportStateText(support.Availability);
+            SupportDetailText.Text = FormatSupportDetail(support, _hasRequiredIntegrity);
+            ShowNotice(SupportDetailText.Text);
         }
         catch (Exception exception)
         {
@@ -170,6 +157,58 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         }
     }
 
+    internal static string GetSupportStateText(WespAvailability availability) => availability switch
+    {
+        WespAvailability.Available => "WESP client DLL is ready",
+        WespAvailability.ClientLibraryMissing => "WESP client DLL is missing",
+        WespAvailability.ClientLibraryInvalid => "WESP client DLL is invalid",
+        WespAvailability.ClientLibraryArchitectureNotSupported => "WESP client DLL must be x64",
+        WespAvailability.ClientLibraryLoadFailed => "WESP client DLL could not load",
+        WespAvailability.RequiredExportMissing => "WESP client APIs are missing",
+        _ => "WESP support is unavailable"
+    };
+
+    internal static string FormatSupportDetail(WespSupportInfo support, bool hasRequiredIntegrity)
+    {
+        var detail = new StringBuilder(support.Summary);
+        if (support.Availability == WespAvailability.ClientLibraryMissing)
+        {
+            detail.AppendLine().AppendLine().Append(
+                "Place an authorized x64 espclient.dll beside Shackles.exe, then choose Refresh support. " +
+                @"For a local build, put it in local-dependencies\wesp\espclient.dll, rebuild, and refresh support.");
+        }
+
+        if (support.CheckedClientLibraryPaths.Count != 0)
+        {
+            detail.AppendLine().AppendLine().Append("Paths checked:");
+            foreach (var path in support.CheckedClientLibraryPaths)
+            {
+                detail.AppendLine().Append(path);
+            }
+        }
+        else if (support.ClientLibraryPath is not null)
+        {
+            detail.AppendLine().AppendLine().Append("Client DLL: ").Append(support.ClientLibraryPath);
+        }
+
+        if (support.Availability == WespAvailability.ClientLibraryMissing &&
+            support.CheckedClientLibraryPaths.Count == 1 &&
+            !string.Equals(support.ClientLibraryPath,
+                Path.Combine(AppContext.BaseDirectory, "espclient.dll"), StringComparison.OrdinalIgnoreCase))
+        {
+            detail.AppendLine().AppendLine().Append(
+                "If SHACKLES_WESP_CLIENT_DLL is set, correct or clear that override before refreshing.");
+        }
+
+        if (!hasRequiredIntegrity)
+        {
+            detail.AppendLine().AppendLine().Append(
+                "You can check the client DLL in this window. Open WESP Blocking as administrator to configure rules or start a session.");
+        }
+
+        return detail.ToString();
+    }
+
     private void ConfigureIntegrityGate()
     {
         InteractiveWorkspace.Visibility = _hasRequiredIntegrity
@@ -183,14 +222,6 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         {
             return;
         }
-
-        RefreshSupportButton.Visibility = Visibility.Collapsed;
-        SupportStateText.Text = _integrityCheckFailure is null
-            ? "Administrator access required"
-            : "Administrator access could not be verified";
-        SupportDetailText.Text = _integrityCheckFailure is null
-            ? "Open a high-integrity Shackles window before configuring WESP Blocking."
-            : "The WESP workspace is locked because Shackles could not verify this process's integrity level.";
 
         if (_integrityCheckFailure is not null)
         {
@@ -480,6 +511,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
     private async Task LaunchAsync()
     {
         if (_disposed ||
+            !_hasRequiredIntegrity ||
             _isBusy ||
             (_session is null && _support?.IsAvailable != true) ||
             _session is { CanApply: false })
@@ -786,6 +818,7 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
     private async Task ApplyExistingProcessesAsync()
     {
         if (_disposed ||
+            !_hasRequiredIntegrity ||
             _isBusy ||
             (_session is null && _support?.IsAvailable != true) ||
             _session is { CanApply: false })
@@ -1540,20 +1573,21 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         }
 
         var active = _session is not null;
+        var canUseWorkspace = _hasRequiredIntegrity && !_isBusy;
         var canApply = _session?.CanApply ?? true;
         var primaryUsesProcessPicker = PrimaryActionUsesProcessPicker();
         var canEditLaunchOptions =
-            !_isBusy &&
+            canUseWorkspace &&
             !primaryUsesProcessPicker &&
             (!active || _session!.CanLaunch);
-        PolicyEditorPanel.IsEnabled = !_isBusy && !active;
-        RootExecutablePanel.IsEnabled = !_isBusy && !active;
+        PolicyEditorPanel.IsEnabled = canUseWorkspace && !active;
+        RootExecutablePanel.IsEnabled = canUseWorkspace && !active;
         ArgumentsTextBox.IsEnabled = canEditLaunchOptions;
         WorkingDirectoryTextBox.IsEnabled = canEditLaunchOptions;
         BrowseWorkingDirectoryButton.IsEnabled = canEditLaunchOptions;
         RefreshSupportButton.IsEnabled = !_isBusy;
         ApplyExistingProcessesButton.IsEnabled =
-            !_isBusy &&
+            canUseWorkspace &&
             (active || _support?.IsAvailable == true) &&
             canApply;
         ApplyExistingProcessesButton.Content = active
@@ -1573,12 +1607,12 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         ApplyExistingProcessesButton.Visibility = primaryUsesProcessPicker
             ? Visibility.Collapsed
             : Visibility.Visible;
-        RefreshSessionButton.IsEnabled = !_isBusy && active;
+        RefreshSessionButton.IsEnabled = canUseWorkspace && active;
         PrimaryActionButton.IsEnabled = primaryUsesProcessPicker
-            ? !_isBusy &&
+            ? canUseWorkspace &&
               (_session is not null || _support?.IsAvailable == true) &&
               canApply
-            : !_isBusy &&
+            : canUseWorkspace &&
               (active
                   ? _session!.CanLaunch
                   : _support?.IsAvailable == true);
@@ -1611,9 +1645,9 @@ public sealed partial class WespWorkspaceView : UserControl, IDisposable
         CloseSessionButton.Visibility = active
             ? Visibility.Visible
             : Visibility.Collapsed;
-        CloseSessionButton.IsEnabled = !_isBusy && active;
-        ResetDraftButton.IsEnabled = !_isBusy && !active;
-        SaveActivityLogButton.IsEnabled = !_isBusy && _activityRows.Count != 0;
+        CloseSessionButton.IsEnabled = canUseWorkspace && active;
+        ResetDraftButton.IsEnabled = canUseWorkspace && !active;
+        SaveActivityLogButton.IsEnabled = canUseWorkspace && _activityRows.Count != 0;
     }
 
     private bool IsReadyForControlUpdates() =>

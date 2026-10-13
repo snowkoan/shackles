@@ -36,11 +36,7 @@ public sealed class WespSupportTests
     [TestMethod]
     public void BundledClientAcceptsEncodedProcessContextKeyInFilter()
     {
-        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
-        {
-            Assert.Inconclusive("The bundled WESP client requires Windows x64.");
-        }
-
+        var libraryPath = WespNativeTestClient.RequireBundledClient();
         var comparison = new NativeContextKeyComparison
         {
             ComparisonType = EspContextKeyComparisonType.Integer,
@@ -48,26 +44,38 @@ public sealed class WespSupportTests
             SourceType = EspValueSourceType.Raw,
             RawValue = 1
         };
-        nint filter = 0;
+        var library = NativeLibrary.Load(libraryPath);
         try
         {
-            var hresult = NativeMethods.EspCreateProcessFilter(
-                0x80000000u | WespRuleCompiler.PolicyContextKey,
-                EspComparisonType.ContextKey,
-                in comparison,
-                out filter);
+            var createFilter = Marshal.GetDelegateForFunctionPointer<CreateProcessFilter>(
+                NativeLibrary.GetExport(library, "EspCreateProcessFilter"));
+            var closeFilter = Marshal.GetDelegateForFunctionPointer<CloseFilter>(
+                NativeLibrary.GetExport(library, "EspCloseFilter"));
+            nint filter = 0;
+            try
+            {
+                var hresult = createFilter(
+                    0x80000000u | WespRuleCompiler.PolicyContextKey,
+                    EspComparisonType.ContextKey,
+                    in comparison,
+                    out filter);
 
-            Assert.IsTrue(
-                hresult >= 0,
-                $"EspCreateProcessFilter rejected the encoded context-key property ID with 0x{hresult:X8}.");
-            Assert.AreNotEqual(0, filter);
+                Assert.IsTrue(
+                    hresult >= 0,
+                    $"EspCreateProcessFilter rejected the encoded context-key property ID with 0x{hresult:X8}.");
+                Assert.AreNotEqual(0, filter);
+            }
+            finally
+            {
+                if (filter != 0)
+                {
+                    Assert.IsTrue(closeFilter(filter) >= 0);
+                }
+            }
         }
         finally
         {
-            if (filter != 0)
-            {
-                Assert.IsTrue(NativeMethods.EspCloseFilter(filter) >= 0);
-            }
+            NativeLibrary.Free(library);
         }
     }
 
@@ -158,4 +166,14 @@ public sealed class WespSupportTests
 
         Assert.AreEqual(generic, exports.Contains(GenericFilterExport), GenericFilterExport);
     }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int CreateProcessFilter(
+        uint propertyId,
+        EspComparisonType comparisonType,
+        in NativeContextKeyComparison comparison,
+        out nint filter);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int CloseFilter(nint filter);
 }

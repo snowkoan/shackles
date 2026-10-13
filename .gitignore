@@ -13,3 +13,6 @@ coverage/
 *.nupkg
 *.snupkg
 *.log
+/local-dependencies/wesp/*
+!/local-dependencies/wesp/README.md
+/src/Shackles.App/espclient.dll

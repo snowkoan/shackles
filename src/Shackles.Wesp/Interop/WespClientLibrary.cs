@@ -4,6 +4,26 @@ internal static class WespClientLibrary
 {
     internal const string OverrideEnvironmentVariable = "SHACKLES_WESP_CLIENT_DLL";
 
+    internal static IReadOnlyList<string> GetSearchPaths() =>
+        GetSearchPaths(
+            Environment.GetEnvironmentVariable(OverrideEnvironmentVariable),
+            AppContext.BaseDirectory,
+            Environment.SystemDirectory);
+
+    internal static IReadOnlyList<string> GetSearchPaths(
+        string? configured,
+        string appBaseDirectory,
+        string systemDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
+
+        return !string.IsNullOrWhiteSpace(configured)
+            ? [Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured))]
+            : [Path.Combine(appBaseDirectory, NativeMethods.WespLibrary),
+               Path.Combine(systemDirectory, NativeMethods.WespLibrary)];
+    }
+
     internal static string GetCandidatePath() =>
         GetCandidatePath(
             Environment.GetEnvironmentVariable(OverrideEnvironmentVariable),
@@ -17,21 +37,10 @@ internal static class WespClientLibrary
         string systemDirectory,
         Func<string, bool> fileExists)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(appBaseDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
         ArgumentNullException.ThrowIfNull(fileExists);
-
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return Path.GetFullPath(
-                Environment.ExpandEnvironmentVariables(configured));
-        }
-
-        var appLocal = Path.Combine(
-            appBaseDirectory,
-            NativeMethods.WespLibrary);
-        return fileExists(appLocal)
-            ? appLocal
-            : Path.Combine(systemDirectory, NativeMethods.WespLibrary);
+        var paths = GetSearchPaths(configured, appBaseDirectory, systemDirectory);
+        return paths.Count == 1 || fileExists(paths[0])
+            ? paths[0]
+            : paths[1];
     }
 }

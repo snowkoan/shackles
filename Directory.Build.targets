@@ -1,0 +1,12 @@
+<Project>
+  <!-- Referencing projects can receive the app's content transitively. Remove
+       only this optional client's stale copies when it is no longer supplied. -->
+  <Target Name="RemoveUnavailableWespClient"
+          BeforeTargets="GetCopyToOutputDirectoryItems;CopyFilesToOutputDirectory;ComputeFilesToPublish"
+          Condition="'$(WespClientAvailable)' != 'true'">
+    <Delete Files="$(TargetDir)espclient.dll"
+            Condition="'$(TargetDir)' != '' and Exists('$(TargetDir)espclient.dll')" />
+    <Delete Files="$(PublishDir)espclient.dll"
+            Condition="'$(PublishDir)' != '' and Exists('$(PublishDir)espclient.dll')" />
+  </Target>
+</Project>
