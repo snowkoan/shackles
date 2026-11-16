@@ -1,7 +1,6 @@
 # Shackles
 
-<img width="2266" height="1473" alt="image" src="https://github.com/user-attachments/assets/29789762-bf3b-46d2-8dd8-909f94efd50c" />
-
+<img width="2465" height="1565" alt="image" src="https://github.com/user-attachments/assets/51912f2e-0ec1-4e0a-85f2-c745adbb55d1" />
 
 Shackles is a Windows desktop app for applying and inspecting Windows process restrictions. Each Windows mechanism has its own workspace, with its scope, lifetime, and host effects shown explicitly.
 
